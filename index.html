@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111311">
+  <title>My Board Games Preorders</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="На главную">
+        <span class="brand-mark">✦</span>
+        <span><b>MY BOARD GAMES</b><small>PREORDERS</small></span>
+      </a>
+      <button class="icon-button" id="backupBtn" title="Резервная копия" aria-label="Резервная копия">↥</button>
+    </header>
+
+    <main>
+      <section class="page active" id="page-home">
+        <div class="eyebrow">ТВОЯ КОЛЛЕКЦИЯ</div>
+        <h1>Игры, которые<br><em>уже на пути.</em></h1>
+        <p class="intro">Все предзаказы и игровые планы — в одном месте.</p>
+        <div class="stats">
+          <article class="stat-card"><span>ПРЕДЗАКАЗЫ</span><strong id="stat-orders">0</strong><small>активных проектов</small></article>
+          <article class="stat-card"><span>В ПУТИ</span><strong id="stat-shipping">0</strong><small>ожидают доставки</small></article>
+        </div>
+        <div class="section-heading"><h2>Последние обновления</h2><button class="text-button" data-go="orders">Все предзаказы →</button></div>
+        <div id="recentList" class="card-list"></div>
+        <div class="empty-state" id="homeEmpty"><div class="empty-icon">♧</div><b>Пока здесь тихо</b><p>Добавь первый предзаказ — и он появится на главной.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
+      </section>
+
+      <section class="page" id="page-orders">
+        <div class="eyebrow">ТВОИ ПРОЕКТЫ</div><h1>Предзаказы</h1>
+        <div class="toolbar"><input id="orderSearch" class="search" placeholder="Найти игру…" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
+        <div id="ordersList" class="card-list"></div>
+        <div id="ordersEmpty" class="empty-state"><div class="empty-icon">♧</div><b>Предзаказов пока нет</b><p>Добавь игру по ссылке или вручную.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
+      </section>
+
+      <section class="page" id="page-wishlist">
+        <div class="eyebrow">КОГДА-НИБУДЬ В КОЛЛЕКЦИИ</div><h1>Wishlist</h1>
+        <div class="toolbar"><input id="wishSearch" class="search" placeholder="Найти игру…" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
+        <div id="wishlistList" class="card-list"></div>
+        <div id="wishlistEmpty" class="empty-state"><div class="empty-icon">♡</div><b>Список желаний пуст</b><p>Сохраняй игры, которые хочешь приобрести.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
+      </section>
+
+      <section class="page" id="page-add">
+        <div class="eyebrow">НОВАЯ ЗАПИСЬ</div><h1 id="formTitle">Добавить игру</h1>
+        <form id="gameForm" class="form-card">
+          <input type="hidden" id="gameId">
+          <label>Ссылка на кампанию или магазин<input id="url" type="url" placeholder="https://www.kickstarter.com/…" inputmode="url"></label>
+          <p class="hint">Площадка определится автоматически, если её удастся распознать.</p>
+          <label>Название игры<input id="name" required placeholder="Например, Dice Throne: Nexus"></label>
+          <div class="form-grid">
+            <label>Тип записи<select id="type"><option value="order">Предзаказ</option><option value="wishlist">Wishlist</option></select></label>
+            <label>Площадка<select id="platform"><option value="">Не указана</option><option>Kickstarter</option><option>Gamefound</option><option>Lavka Games</option><option>GaGa Games</option><option>Другое</option></select></label>
+          </div>
+          <div id="orderFields">
+            <label>Статус<select id="status"><option value="campaign">Кампания / предзаказ</option><option value="production">Производство</option><option value="shipping">Отправлено</option><option value="delivered">Доставлено</option><option value="paused">Приостановлено</option></select></label>
+            <div class="form-grid">
+              <label>Цена игры<input id="price" type="number" min="0" step="0.01" placeholder="0"></label>
+              <label>Валюта<select id="currency"><option>EUR</option><option>USD</option><option>RSD</option><option>GBP</option></select></label>
+            </div>
+            <label>Доставка<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
+            <label>Ожидаемая дата<input id="eta" type="text" placeholder="Например, март 2027"></label>
+          </div>
+          <label>Заметки<textarea id="notes" rows="3" placeholder="Комплектация, дополнения, stretch goals…"></textarea></label>
+          <div class="form-actions"><button type="button" class="secondary-button" id="cancelEdit">Отмена</button><button class="primary-button" type="submit">Сохранить игру</button></div>
+          <p class="form-note" id="formNote">Данные сохраняются в этом браузере на устройстве. Импорт с площадок пока не подключён.</p>
+        </form>
+      </section>
+
+      <section class="page" id="page-settings">
+        <div class="eyebrow">ДАННЫЕ И ПРИЛОЖЕНИЕ</div><h1>Настройки</h1>
+        <div class="settings-card">
+          <h3>Резервная копия</h3><p>Сохрани каталог в JSON-файл или восстанови его на другом устройстве.</p>
+          <div class="settings-actions"><button class="primary-button" id="exportBtn">Экспорт JSON</button><label class="secondary-button file-label">Импорт JSON<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
+        </div>
+        <div class="settings-card"><h3>Хранение данных</h3><p>Сейчас данные хранятся локально в браузере. Они не синхронизируются между устройствами автоматически.</p><p class="muted">Версия 0.2 · GitHub Pages edition</p></div>
+        <div class="settings-card"><h3>Проверка обновлений</h3><p>Автоматическое получение новостей и статусов с Kickstarter, Gamefound и магазинов пока не подключено. Кнопка проверки появится после интеграции источников.</p></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Основная навигация">
+      <a href="#home" data-page="home" class="nav-item active"><span>⌂</span><small>Главная</small></a>
+      <a href="#orders" data-page="orders" class="nav-item"><span>▤</span><small>Предзаказы</small></a>
+      <a href="#wishlist" data-page="wishlist" class="nav-item"><span>♡</span><small>Wishlist</small></a>
+      <a href="#add" data-page="add" class="nav-item"><span>＋</span><small>Добавить</small></a>
+      <a href="#settings" data-page="settings" class="nav-item"><span>⚙</span><small>Ещё</small></a>
+    </nav>
+  </div>
+  <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
