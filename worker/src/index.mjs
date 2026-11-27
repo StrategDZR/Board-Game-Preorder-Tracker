@@ -2,7 +2,7 @@ const CURRENCIES = ['EUR', 'USD', 'RSD', 'GBP'];
 const SLUG = /^[a-z0-9][a-z0-9_-]*$/i;
 const MAX_CATALOG_BYTES = 1_000_000;
 const MAX_SOURCE_BYTES = 1_000_000;
-const BURST_LIMITS = { import: 12, updates: 40, read: 60, write: 30 };
+const BURST_LIMITS = { import: 12, read: 60, write: 30 };
 const bursts = new Map();
 
 // Best-effort protection per isolate. Cloudflare enforces the account-wide Free quotas.
@@ -146,33 +146,6 @@ async function readKickstarterWidget(response, project) {
   };
 }
 
-async function campaignUpdates(project) {
-  const kickstarter = project.platform === 'Kickstarter';
-  const feedUrl = project.url + (kickstarter ? '/posts' : '/updates');
-  const response = await upstream('https://r.jina.ai/' + feedUrl, 'text/plain', 14_000);
-  if (response.status === 429) return { rateLimited: true };
-  if (!response.ok) return null;
-  const content = await readText(response, MAX_SOURCE_BYTES);
-  if (content.match(/^URL Source: (.+)$/m)?.[1].trim() !== feedUrl) return null;
-  const updates = [];
-  const seen = new Set();
-  const pattern = kickstarter
-    ? /^Update #(\d+)\r?\n(?:[ \t]*\r?\n)*#{1,3}[ \t]+([^\r\n]+)/gm
-    : /^\[Update #(\d+) (\d{1,2})\/(\d{1,2})\/(\d{4}) [^#\r\n]+#[ \t]+(.+?)(?= !\[| \[Read more\]|\r?$)/gm;
-  for (const match of content.matchAll(pattern)) {
-    const number = Number(match[1]);
-    if (!Number.isSafeInteger(number) || number < 1 || seen.has(number)) continue;
-    const title = clean(kickstarter ? match[2] : match[5], 260);
-    if (!title) continue;
-    seen.add(number);
-    const published = kickstarter ? '' : date(`${match[4]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`);
-    const postUrl = kickstarter ? feedUrl : `${feedUrl}/${number}`;
-    updates.push({ number, title, url: postUrl, published });
-  }
-  if (!updates.length) return null;
-  return { campaign: project.url, updates: updates.sort((a, b) => b.number - a.number).slice(0, 30) };
-}
-
 async function authorized(request, secret) {
   if (!secret || secret.length < 32) return false;
   const encode = value => new TextEncoder().encode(value);
@@ -195,10 +168,10 @@ export default {
     headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const url = new URL(request.url);
-    if (!['/api/import', '/api/updates', '/api/catalog'].includes(url.pathname)) return json({ error: 'Маршрут не найден.' }, 404);
+    if (!['/api/import', '/api/catalog'].includes(url.pathname)) return json({ error: 'Маршрут не найден.' }, 404);
     if (!await authorized(request, env.ACCESS_TOKEN)) return json({ error: 'Проверьте ключ доступа.' }, 401);
     let operation;
-    if (request.method === 'GET') operation = url.pathname === '/api/catalog' ? 'read' : url.pathname.slice(5);
+    if (request.method === 'GET') operation = url.pathname === '/api/import' ? 'import' : 'read';
     if (request.method === 'PUT' && url.pathname === '/api/catalog') operation = 'write';
     if (!operation) return json({ error: 'Метод не поддерживается.' }, 405);
     const retryAfter = burstRetryAfter(operation);
@@ -218,19 +191,6 @@ export default {
         // An unavailable source must leave the editable form intact.
       }
       return json({ error: `${project.platform} не вернул данные кампании. Заполните карточку вручную или повторите позже.` }, 502);
-    }
-
-    if (operation === 'updates') {
-      const project = campaign(url.searchParams.get('url'));
-      if (!project) return json({ error: 'У предзаказа нет поддерживаемой ссылки на кампанию.' }, 400);
-      try {
-        const result = await campaignUpdates(project);
-        if (result?.rateLimited) return json({ error: 'Источник обновлений ограничил проверку. Повторите позже.' }, 429);
-        if (result) return json(result);
-      } catch {
-        // A timeout or unexpected source layout is not an empty news feed.
-      }
-      return json({ error: `${project.platform} не вернул читаемый список обновлений.` }, 502);
     }
 
     if (url.pathname === '/api/catalog') {

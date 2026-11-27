@@ -142,6 +142,57 @@
     return game.type === 'order' && game.status !== 'delivered';
   }
 
+  function parseUpdates(content, project) {
+    const kickstarter = project.startsWith('https://www.kickstarter.com/');
+    const feedUrl = project + (kickstarter ? '/posts' : '/updates');
+    if (content.match(/^URL Source: (.+)$/m)?.[1].trim() !== feedUrl) return null;
+    const updates = [];
+    const seen = new Set();
+    const pattern = kickstarter
+      ? /^Update #(\d+)\r?\n(?:[ \t]*\r?\n)*#{1,3}[ \t]+([^\r\n]+)/gm
+      : /^\[Update #(\d+) (\d{1,2})\/(\d{1,2})\/(\d{4}) [^#\r\n]+#[ \t]+(.+?)(?= !\[| \[Read more\]|\r?$)/gm;
+    for (const match of content.matchAll(pattern)) {
+      const number = Number(match[1]);
+      if (!Number.isSafeInteger(number) || number < 1 || seen.has(number)) continue;
+      const title = (kickstarter ? match[2] : match[5]).trim().slice(0, 260);
+      if (!title) continue;
+      seen.add(number);
+      const published = kickstarter ? '' : `${match[4]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+      const postUrl = kickstarter ? feedUrl : `${feedUrl}/${number}`;
+      updates.push({ number, title, url: postUrl, published });
+    }
+    if (!updates.length) return null;
+    return { campaign: project, updates: updates.sort((a, b) => b.number - a.number).slice(0, 30) };
+  }
+
+  async function loadUpdates(project, signal) {
+    const site = project.startsWith('https://www.kickstarter.com/') ? 'Kickstarter' : 'Gamefound';
+    const feed = project + (site === 'Kickstarter' ? '/posts' : '/updates');
+    const response = await fetch('https://r.jina.ai/' + feed, {
+      signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error',
+      headers: { Accept: 'text/plain' }
+    });
+    if (response.status === 429) throw Object.assign(new Error('Источник обновлений ограничил проверку. Повторите позже.'), { status: 429 });
+    if (!response.ok || !response.body) throw Object.assign(new Error(site + ' не вернул список обновлений.'), { status: response.status });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let size = 0;
+    let content = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1_000_000) {
+        await reader.cancel();
+        throw Object.assign(new Error('Список обновлений слишком большой.'), { status: 413 });
+      }
+      content += decoder.decode(value, { stream: true });
+    }
+    const result = parseUpdates(content + decoder.decode(), project);
+    if (!result) throw Object.assign(new Error(site + ' не вернул читаемый список обновлений.'), { status: 502 });
+    return result;
+  }
+
   function addUpdates(game, result) {
     if (!Array.isArray(result.updates) || !result.updates.length) return 0;
     const history = Array.isArray(game.updateHistory) ? game.updateHistory.filter(Boolean) : [];
@@ -194,11 +245,10 @@
           request.signal.addEventListener('abort', cancel, { once: true });
           const timeout = setTimeout(cancel, 18_000);
           try {
-            const result = await api('/api/updates?url=' + encodeURIComponent(url), { signal: controller.signal });
-            if (result.campaign !== url || !Array.isArray(result.updates)) throw new Error('Некорректный список обновлений.');
+            const result = await loadUpdates(url, controller.signal);
             found.push({ url, ids, result });
           } catch (error) {
-            errors.push(error.status ? error.message : 'Источник не ответил вовремя.');
+            errors.push(error.status ? error.message : 'Не удалось связаться с источником обновлений.');
           } finally {
             clearTimeout(timeout);
             request.signal.removeEventListener('abort', cancel);
