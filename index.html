@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111311">
   <title>My Board Games Preorders</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=0.4.7">
 </head>
 <body>
   <main class="app-shell" id="authGate">
@@ -68,22 +68,21 @@
           <label>Автор / издатель<input id="publisher"></label>
           <label>Описание<textarea id="description" rows="3"></textarea></label>
           <div class="form-grid">
-            <label>Начало кампании<input id="campaignStart" type="date"></label>
-            <label>Конец кампании<input id="campaignEnd" type="date"></label>
-          </div>
-          <div class="form-grid">
             <label>Тип записи<select id="type"><option value="order">Предзаказ</option><option value="wishlist">Wishlist</option></select></label>
             <label>Площадка<select id="platform"><option value="">Не указана</option><option>Kickstarter</option><option>Gamefound</option><option>Lavka Games</option><option>GaGa Games</option><option>Dire Wolf</option><option>Другое</option></select></label>
           </div>
           <label>Валюта<select id="currency"><option value="">Не указана</option><option>EUR</option><option>USD</option><option>RSD</option><option>GBP</option><option>RUB</option></select></label>
           <label>Цена игры<input id="price" type="number" min="0" step="0.01" placeholder="0"></label>
-          <div id="orderFields">
+          <fieldset id="orderFields" class="order-fields">
             <label>Статус<select id="status"><option value="campaign">Кампания / предзаказ</option><option value="production">Производство</option><option value="shipping">Отправлено</option><option value="delivered">Доставлено</option><option value="paused">Приостановлено</option></select></label>
-            <label>Доставка<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
-            <label>Ожидаемая дата<input id="eta" type="text" placeholder="Например, март 2027"></label>
-          </div>
+            <label>Ожидаемая доставка<input id="eta" type="text" placeholder="Например, март 2027"></label>
+            <label>Фактически отправлено<input id="actualShipDate" type="date"></label>
+            <label>Фактически получено<input id="actualDeliveryDate" type="date"></label>
+            <label>Стоимость доставки<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
+            <label>Конец кампании<input id="campaignEnd" type="date"></label>
+          </fieldset>
           <label>Заметки<textarea id="notes" rows="3" placeholder="Комплектация, дополнения, stretch goals…"></textarea></label>
-          <div class="form-actions"><button type="button" class="secondary-button" id="cancelEdit">Отмена</button><button class="primary-button" type="submit">Сохранить игру</button></div>
+          <div class="form-actions"><button type="button" class="secondary-button" id="cancelEdit" hidden>Отмена</button><button class="primary-button" type="submit">Сохранить игру</button></div>
         </form>
       </section>
 
@@ -119,6 +118,6 @@
   </div>
   <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.6"></script>
+  <script src="./app.js?v=0.4.7"></script>
 </body>
 </html>

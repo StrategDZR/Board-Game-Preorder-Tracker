@@ -5,9 +5,9 @@
   let games = [];
   let editingId = null;
   const $ = id => document.getElementById(id);
-  const fields = ['url', 'name', 'type', 'platform', 'status', 'price', 'currency',
-    'shipping', 'eta', 'notes', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd'];
-  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd', 'currency', 'price'];
+  const fields = ['url', 'name', 'type', 'platform', 'price', 'currency', 'notes', 'cover', 'publisher', 'description'];
+  const orderFields = ['status', 'shipping', 'eta', 'actualShipDate', 'actualDeliveryDate', 'campaignEnd'];
+  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignEnd', 'currency', 'price'];
   const cloudKey = 'mbgp_v03_cloud';
   const googleSessionKey = 'mbgp_google_session';
   const workerEndpoint = 'https://board-game-preorder-tracker.strategdzr.workers.dev';
@@ -113,13 +113,29 @@
   }
   function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
   function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2300)}
-  function go(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active',a.dataset.page===page));if(page==='add'&&!editingId)resetForm();window.scrollTo(0,0)}
-  document.querySelectorAll('[data-page]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();go(a.dataset.page)}));
-  document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.go)));
+  function go(page, newType) {
+    if (page === 'add' && (newType || !editingId)) resetForm(newType);
+    document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));
+    document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active',a.dataset.page===page));
+    window.scrollTo(0,0);
+  }
+  function navigate(page) {
+    if (page === 'add') {
+      if ($('page-add').classList.contains('active')) return;
+      go(page, $('page-wishlist').classList.contains('active') ? 'wishlist' : 'order');
+    } else go(page);
+  }
+  document.querySelectorAll('[data-page]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page)}));
+  document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
   function platformFromUrl(url){const u=(url||'').toLowerCase();if(u.includes('kickstarter.com'))return 'Kickstarter';if(u.includes('gamefound.com'))return 'Gamefound';if(u.includes('lavka.games')||u.includes('lavkaigr.ru'))return 'Lavka Games';if(u.includes('gaga.ru')||u.includes('gagagames'))return 'GaGa Games';return ''}
   $('url').addEventListener('change',()=>{const p=platformFromUrl($('url').value);if(p)$('platform').value=p});
-  $('type').addEventListener('change',()=>{$('orderFields').style.display=$('type').value==='order'?'block':'none'});
-  function card(g){const status=g.type==='wishlist'?'Wishlist':(statusLabels[g.status]||'Предзаказ');const cls=Object.hasOwn(statusLabels,g.status)?g.status:'';const cover=webUrl(g.cover);return `<article class="game-card" data-id="${esc(g.id)}"><div class="cover">${cover?`<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">`:'✦'}</div><div class="game-info"><h3>${esc(g.name)}</h3><p>${esc(g.platform||'Площадка не указана')} · ${esc(g.eta|| (g.type==='wishlist'?'В списке желаний':''))}</p><span class="status ${cls}">${esc(status)}</span></div><span class="arrow">›</span></article>`}
+  function showOrderFields() {
+    const isOrder = $('type').value === 'order';
+    $('orderFields').hidden = !isOrder;
+    $('orderFields').disabled = !isOrder;
+  }
+  $('type').addEventListener('change', showOrderFields);
+  function card(g){const status=g.type==='wishlist'?'Wishlist':(statusLabels[g.status]||'Предзаказ');const cls=g.type==='order'&&Object.hasOwn(statusLabels,g.status)?g.status:'';const cover=webUrl(g.cover);return `<article class="game-card" data-id="${esc(g.id)}"><div class="cover">${cover?`<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">`:'✦'}</div><div class="game-info"><h3>${esc(g.name)}</h3><p>${esc(g.platform||'Площадка не указана')} · ${esc(g.type==='wishlist'?'В списке желаний':g.eta||'')}</p><span class="status ${cls}">${esc(status)}</span></div><span class="arrow">›</span></article>`}
   function renderList(containerId,emptyId,items){$(containerId).innerHTML=items.map(card).join('');$(emptyId).classList.toggle('show',items.length===0);$(containerId).querySelectorAll('.game-card').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)))}
   function render(){const orders=games.filter(g=>g.type==='order'),wish=games.filter(g=>g.type==='wishlist');$('stat-orders').textContent=orders.filter(g=>g.status!=='delivered').length;$('stat-shipping').textContent=orders.filter(g=>g.status==='shipping').length;renderList('ordersList','ordersEmpty',filter(orders,$('orderSearch').value));renderList('wishlistList','wishlistEmpty',filter(wish,$('wishSearch').value));const recent=[...orders].sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,3);renderList('recentList','homeEmpty',recent);$('homeEmpty').classList.toggle('show',orders.length===0)}
   function filter(items,q){q=(q||'').trim().toLowerCase();return items.filter(g=>!q||`${g.name} ${g.platform} ${g.notes}`.toLowerCase().includes(q))}
@@ -132,13 +148,27 @@
     $('formNote').textContent = 'Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.';
   }
   $('url').addEventListener('input', cancelImport);
-  function resetForm(){editingId=null;cancelImport();$('gameForm').reset();$('gameId').value='';$('formTitle').textContent='Добавить игру';$('orderFields').style.display='block';$('type').value='order';$('cancelEdit').style.display='none'}
-  $('cancelEdit').addEventListener('click',()=>{resetForm();go('orders')});
+  function resetForm(type = 'order') {
+    editingId = null;
+    cancelImport();
+    $('gameForm').reset();
+    $('gameId').value = '';
+    $('formTitle').textContent = 'Добавить игру';
+    $('type').value = type;
+    showOrderFields();
+    $('cancelEdit').hidden = true;
+  }
+  $('cancelEdit').addEventListener('click', () => {
+    const page = games.find(game => game.id === editingId)?.type === 'wishlist' ? 'wishlist' : 'orders';
+    resetForm();
+    go(page);
+  });
   $('gameForm').addEventListener('submit', event => {
     event.preventDefault();
     const id = editingId || crypto.randomUUID();
     const index = games.findIndex(game => game.id === id);
-    const values = Object.fromEntries(fields.map(field => [field, $(field).value.trim()]));
+    const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : fields;
+    const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
     if (!values.name) return;
     const game = { ...games[index], ...values, id, updated: Date.now() };
     if (index >= 0) games[index] = game;
@@ -148,8 +178,19 @@
     go(game.type === 'wishlist' ? 'wishlist' : 'orders');
     toast(index >= 0 ? 'Изменения сохранены' : 'Игра добавлена');
   });
-  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(statusLabels[g.status]||'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Начало кампании', g.campaignStart], ['Конец кампании', g.campaignEnd], ['Описание', g.description]].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${g.eta?`<p><b>Ожидаемая дата:</b> ${esc(g.eta)}</p>`:''}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
-  function editGame(g){editingId=g.id;cancelImport();$('gameId').value=g.id;$('formTitle').textContent='Редактировать игру';for(const id of fields)$(id).value=g[id]??'';$('orderFields').style.display=g.type==='order'?'block':'none';$('cancelEdit').style.display='inline-block';go('add')}
+  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);const order=g.type==='order';d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ...(order ? [['Ожидаемая доставка', g.eta], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
+  function editGame(game) {
+    resetForm(game.type);
+    editingId = game.id;
+    $('gameId').value = game.id;
+    $('formTitle').textContent = 'Редактировать игру';
+    for (const id of [...fields, ...orderFields]) {
+      if (id !== 'status' || Object.hasOwn(statusLabels, game.status)) $(id).value = game[id] ?? '';
+    }
+    showOrderFields();
+    $('cancelEdit').hidden = false;
+    go('add');
+  }
   $('closeDialog').addEventListener('click',()=>$('detailDialog').close());
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
   $('exportBtn').addEventListener('click',exportJson);$('backupBtn').addEventListener('click',exportJson);
@@ -477,7 +518,8 @@
       const result = await importMetadata(url, controller.signal);
       if (version !== formVersion) return;
       for (const id of importFields) {
-        if (id === 'price' || id === 'currency' && result.price) continue;
+        if (id === 'price' || id === 'currency' && result.price ||
+            id === 'campaignEnd' && $('type').value !== 'order') continue;
         if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') $(id).value = result[id];
       }
       if (result.price && result.currency && !before.price && !$('price').value &&
