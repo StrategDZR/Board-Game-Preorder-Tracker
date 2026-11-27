@@ -129,12 +129,14 @@
   document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
   function platformFromUrl(url){const u=(url||'').toLowerCase();if(u.includes('kickstarter.com'))return 'Kickstarter';if(u.includes('gamefound.com'))return 'Gamefound';if(u.includes('lavka.games')||u.includes('lavkaigr.ru'))return 'Lavka Games';if(u.includes('gaga.ru')||u.includes('gagagames'))return 'GaGa Games';return ''}
   $('url').addEventListener('change',()=>{const p=platformFromUrl($('url').value);if(p)$('platform').value=p});
-  function showOrderFields() {
+  function showTypeFields() {
     const isOrder = $('type').value === 'order';
     $('orderFields').hidden = !isOrder;
     $('orderFields').disabled = !isOrder;
+    $('releaseDateField').hidden = isOrder;
+    $('releaseDate').disabled = isOrder;
   }
-  $('type').addEventListener('change', showOrderFields);
+  $('type').addEventListener('change', showTypeFields);
   function card(g){const status=g.type==='wishlist'?'Wishlist':(statusLabels[g.status]||'Предзаказ');const cls=g.type==='order'&&Object.hasOwn(statusLabels,g.status)?g.status:'';const cover=webUrl(g.cover);return `<article class="game-card" data-id="${esc(g.id)}"><div class="cover">${cover?`<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">`:'✦'}</div><div class="game-info"><h3>${esc(g.name)}</h3><p>${esc(g.platform||'Площадка не указана')} · ${esc(g.type==='wishlist'?'В списке желаний':g.eta||'')}</p><span class="status ${cls}">${esc(status)}</span></div><span class="arrow">›</span></article>`}
   function renderList(containerId,emptyId,items){$(containerId).innerHTML=items.map(card).join('');$(emptyId).classList.toggle('show',items.length===0);$(containerId).querySelectorAll('.game-card').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)))}
   function render(){const orders=games.filter(g=>g.type==='order'),wish=games.filter(g=>g.type==='wishlist');$('stat-orders').textContent=orders.filter(g=>g.status!=='delivered').length;$('stat-shipping').textContent=orders.filter(g=>g.status==='shipping').length;renderList('ordersList','ordersEmpty',filter(orders,$('orderSearch').value));renderList('wishlistList','wishlistEmpty',filter(wish,$('wishSearch').value));const recent=[...orders].sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,3);renderList('recentList','homeEmpty',recent);$('homeEmpty').classList.toggle('show',orders.length===0)}
@@ -155,7 +157,7 @@
     $('gameId').value = '';
     $('formTitle').textContent = 'Добавить игру';
     $('type').value = type;
-    showOrderFields();
+    showTypeFields();
     $('cancelEdit').hidden = true;
   }
   $('cancelEdit').addEventListener('click', () => {
@@ -167,7 +169,7 @@
     event.preventDefault();
     const id = editingId || crypto.randomUUID();
     const index = games.findIndex(game => game.id === id);
-    const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : fields;
+    const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : [...fields, 'releaseDate'];
     const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
     if (!values.name) return;
     const game = { ...games[index], ...values, id, updated: Date.now() };
@@ -178,16 +180,48 @@
     go(game.type === 'wishlist' ? 'wishlist' : 'orders');
     toast(index >= 0 ? 'Изменения сохранены' : 'Игра добавлена');
   });
-  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);const order=g.type==='order';d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ...(order ? [['Ожидаемая доставка', g.eta], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
+  function showDetail(id) {
+    const g = games.find(game => game.id === id);
+    if (!g) return;
+    const d = $('detailContent');
+    const url = webUrl(g.url);
+    const order = g.type === 'order';
+    d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ['Дата релиза', g.releaseDate], ...(order ? [['Ожидаемая доставка', g.eta], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions">${order?'':'<button type="button" class="primary-button" id="moveToOrders">Перенести в предзаказы</button>'}<button type="button" class="${order?'primary':'secondary'}-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;
+    $('detailDialog').showModal();
+    $('editGame').onclick = () => {
+      $('detailDialog').close();
+      editGame(g);
+    };
+    if (!order) $('moveToOrders').onclick = () => moveToOrders(id);
+    $('deleteGame').onclick = () => {
+      if (!confirm('Удалить эту запись?')) return;
+      games = games.filter(game => game.id !== id);
+      save();
+      $('detailDialog').close();
+      toast('Запись удалена');
+    };
+  }
+
+  function moveToOrders(id) {
+    const game = games.find(entry => entry.id === id && entry.type === 'wishlist');
+    if (!game) return;
+    game.type = 'order';
+    if (!Object.hasOwn(statusLabels, game.status)) game.status = 'campaign';
+    game.updated = Date.now();
+    $('detailDialog').close();
+    save();
+    go('orders');
+    toast('Игра перенесена в предзаказы');
+  }
   function editGame(game) {
     resetForm(game.type);
     editingId = game.id;
     $('gameId').value = game.id;
     $('formTitle').textContent = 'Редактировать игру';
-    for (const id of [...fields, ...orderFields]) {
+    for (const id of [...fields, ...orderFields, 'releaseDate']) {
       if (id !== 'status' || Object.hasOwn(statusLabels, game.status)) $(id).value = game[id] ?? '';
     }
-    showOrderFields();
+    showTypeFields();
     $('cancelEdit').hidden = false;
     go('add');
   }

@@ -7,7 +7,8 @@
 #formNote { margin: 8px 0 16px; }
 .form-grid label { min-width: 0; }
 .order-fields { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.order-fields input[type="date"] { min-width: 0; max-width: 100%; min-height: 44px; }
+.form-card input[type="date"] { min-width: 0; max-width: 100%; min-height: 44px; }
+.form-card label[hidden] { display: none; }
 button:disabled { opacity: .55; cursor: default; }
 .update-history li { margin-bottom: 8px; font-size: 13px; overflow-wrap: anywhere; }
 .update-history a { color: var(--gold); }
