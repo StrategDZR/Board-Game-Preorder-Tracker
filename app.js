@@ -7,7 +7,7 @@
   const $ = id => document.getElementById(id);
   const fields = ['url', 'name', 'type', 'platform', 'status', 'price', 'currency',
     'shipping', 'eta', 'notes', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd'];
-  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd', 'currency'];
+  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd', 'currency', 'price'];
   const cloudKey = 'mbgp_v03_cloud';
   const googleSessionKey = 'mbgp_google_session';
   const workerEndpoint = 'https://board-game-preorder-tracker.strategdzr.workers.dev';
@@ -129,7 +129,7 @@
     importRequest?.abort();
     importRequest = null;
     $('fetchGame').disabled = false;
-    $('formNote').textContent = 'Импорт доступен для Kickstarter и Gamefound.';
+    $('formNote').textContent = 'Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.';
   }
   $('url').addEventListener('input', cancelImport);
   function resetForm(){editingId=null;cancelImport();$('gameForm').reset();$('gameId').value='';$('formTitle').textContent='Добавить игру';$('orderFields').style.display='block';$('type').value='order';$('cancelEdit').style.display='none'}
@@ -148,7 +148,7 @@
     go(game.type === 'wishlist' ? 'wishlist' : 'orders');
     toast(index >= 0 ? 'Изменения сохранены' : 'Игра добавлена');
   });
-  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(statusLabels[g.status]||'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Начало кампании', g.campaignStart], ['Конец кампании', g.campaignEnd], ['Описание', g.description]].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${g.eta?`<p><b>Ожидаемая дата:</b> ${esc(g.eta)}</p>`:''}${g.type==='order'&&(g.price||g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}<br><b>Доставка:</b> ${esc(g.shipping||'—')} ${esc(g.currency)}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
+  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(statusLabels[g.status]||'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Начало кампании', g.campaignStart], ['Конец кампании', g.campaignEnd], ['Описание', g.description]].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${g.eta?`<p><b>Ожидаемая дата:</b> ${esc(g.eta)}</p>`:''}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
   function editGame(g){editingId=g.id;cancelImport();$('gameId').value=g.id;$('formTitle').textContent='Редактировать игру';for(const id of fields)$(id).value=g[id]??'';$('orderFields').style.display=g.type==='order'?'block':'none';$('cancelEdit').style.display='inline-block';go('add')}
   $('closeDialog').addEventListener('click',()=>$('detailDialog').close());
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
@@ -370,7 +370,13 @@
       const result = await api('/api/import?url=' + encodeURIComponent(url), { signal: controller.signal });
       if (version !== formVersion) return;
       for (const id of importFields) {
+        if (id === 'price' || id === 'currency' && result.price) continue;
         if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') $(id).value = result[id];
+      }
+      if (result.price && result.currency && !before.price && !$('price').value &&
+          $('currency').value === before.currency && (!before.currency || before.currency === result.currency)) {
+        $('currency').value = result.currency;
+        $('price').value = result.price;
       }
       note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.' +
         (typeof result.sourceNote === 'string' ? ' ' + result.sourceNote : '');

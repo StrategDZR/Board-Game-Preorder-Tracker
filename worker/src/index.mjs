@@ -1,4 +1,4 @@
-const CURRENCIES = ['EUR', 'USD', 'RSD', 'GBP'];
+const CURRENCIES = ['EUR', 'USD', 'RSD', 'GBP', 'RUB'];
 const SLUG = /^[a-z0-9][a-z0-9_-]*$/i;
 const MAX_CATALOG_BYTES = 1_000_000;
 const MAX_SOURCE_BYTES = 1_000_000;
@@ -21,10 +21,10 @@ function burstRetryAfter(operation, now = Date.now()) {
 
 class BodyTooLarge extends Error {}
 
-async function readText(message, limit) {
+async function readText(message, limit, encoding = 'utf-8') {
   const reader = message.body?.getReader();
   if (!reader) return '';
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder(encoding);
   let size = 0;
   let text = '';
   while (true) {
@@ -44,6 +44,8 @@ function campaign(raw) {
   let url;
   try { url = new URL(raw); } catch { return null; }
   if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
+  const shop = storeFromUrl(url);
+  if (shop) return shop;
   const match = url.pathname.match(/^\/(?:[a-z]{2}\/)?projects\/([^/]+)\/([^/]+)(?:\/.*)?$/i);
   if (!match || !SLUG.test(match[1]) || !SLUG.test(match[2])) return null;
   const [, creator, slug] = match;
@@ -52,6 +54,19 @@ function campaign(raw) {
   }
   if (['kickstarter.com', 'www.kickstarter.com'].includes(url.hostname)) {
     return { platform: 'Kickstarter', url: `https://www.kickstarter.com/projects/${creator}/${slug}` };
+  }
+  return null;
+}
+
+function storeFromUrl(url) {
+  if (url.hostname === 'shop.direwolfdigital.com') {
+    const product = url.pathname.match(/^\/products\/([a-z\d][a-z\d_-]*)\/?$/i);
+    return { platform: 'Dire Wolf', store: true, url: product ?
+      `https://shop.direwolfdigital.com/products/${product[1]}` : '' };
+  }
+  if (['gaga.ru', 'www.gaga.ru'].includes(url.hostname)) {
+    const product = url.pathname.match(/^\/game\/([a-z\d][a-z\d_-]*)\/?$/i);
+    return { platform: 'GaGa Games', store: true, url: product ? `https://gaga.ru/game/${product[1]}/` : '' };
   }
   return null;
 }
@@ -93,6 +108,42 @@ async function importGamefound(project) {
     campaignStart: date(data.campaignStartDate),
     campaignEnd: date(data.campaignEndDate),
     currency: CURRENCIES.includes(data.currencyShortName) ? data.currencyShortName : ''
+  };
+}
+
+async function importStore(product) {
+  const response = await upstream(product.url, 'text/html');
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok || !contentType.toLowerCase().includes('text/html')) return null;
+  const encoding = /charset\s*=\s*["']?(?:windows-1251|cp1251)/i.test(contentType) ? 'windows-1251' : 'utf-8';
+  const html = await readText(response, MAX_SOURCE_BYTES, encoding);
+  const fields = new Map();
+  const set = (key, value) => {
+    if (value && !fields.has(key)) fields.set(key, value);
+  };
+  let name = '';
+  const rewriter = new HTMLRewriter()
+    .on('head meta[property^="og:"]', { element(el) { set(el.getAttribute('property'), el.getAttribute('content')); } })
+    .on('h1[itemprop="name"]', { text(chunk) { if (name.length < 300) name += chunk.text; } })
+    .on('[itemprop="brand"]', { element(el) { set('brand', el.getAttribute('content')); } })
+    .on('main .detail-card meta[itemprop="priceCurrency"]', { element(el) { set('storeCurrency', el.getAttribute('content')); } })
+    .on('main .detail-card .card-btns [data-vendor]', {
+      element(el) { set('vendor', el.getAttribute('data-vendor')); set('storePrice', el.getAttribute('data-price')); }
+    });
+  const body = rewriter.transform(new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })).body;
+  for await (const chunk of body) { /* Consume rewritten HTML to collect fields. */ }
+  const canonical = campaign(fields.get('og:url'));
+  if (canonical?.url !== product.url || !name.trim()) return null;
+  const currency = fields.get('og:price:currency') || fields.get('storeCurrency');
+  const price = fields.get('og:price:amount') || fields.get('storePrice');
+  const hasPrice = CURRENCIES.includes(currency) && typeof price === 'string' && /^\d{1,9}(?:\.\d{1,2})?$/.test(price);
+  return {
+    name: clean(name.replace(/\s+/g, ' '), 300),
+    cover: httpsImage(fields.get('og:image:secure_url') || fields.get('og:image'), product.url),
+    description: clean(fields.get('og:description'), 5000),
+    publisher: clean(fields.get('brand') || fields.get('vendor'), 300),
+    price: hasPrice ? price : '',
+    currency: hasPrice ? currency : ''
   };
 }
 
@@ -259,15 +310,17 @@ export default {
 
     if (url.pathname === '/api/import' && request.method === 'GET') {
       const project = campaign(url.searchParams.get('url'));
-      if (!project) return json({ error: 'Вставьте HTTPS-ссылку на кампанию Kickstarter или Gamefound.' }, 400);
+      if (!project) return json({ error: 'Вставьте HTTPS-ссылку на кампанию Kickstarter или Gamefound либо на товар Dire Wolf или GaGa.' }, 400);
+      if (!project.url) return json({ error: 'Откройте конкретную игру в магазине и вставьте ссылку на её страницу.' }, 400);
       try {
-        const data = await (project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
+        const data = await (project.store ? importStore(project) :
+          project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
         if (data?.rateLimited) return json({ error: 'Достигнут бесплатный лимит резервного источника Kickstarter. Попробуйте позже или заполните карточку вручную.' }, 429);
         if (data?.name) return json({ ...data, platform: project.platform });
       } catch {
         // An unavailable source must leave the editable form intact.
       }
-      return json({ error: `${project.platform} не вернул данные кампании. Заполните карточку вручную или повторите позже.` }, 502);
+      return json({ error: `${project.platform} не вернул данные страницы. Заполните карточку вручную или повторите позже.` }, 502);
     }
 
     if (url.pathname === '/api/catalog') {
