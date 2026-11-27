@@ -1,16 +1,18 @@
 (() => {
   const KEY = 'mbgp_v02_games';
-  let games = load();
+  let games = [];
   let editingId = null;
   const $ = id => document.getElementById(id);
   const fields = ['url', 'name', 'type', 'platform', 'status', 'price', 'currency',
     'shipping', 'eta', 'notes', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd'];
   const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd', 'currency'];
   const cloudKey = 'mbgp_v03_cloud';
+  const googleSessionKey = 'mbgp_google_session';
   const workerEndpoint = 'https://board-game-preorder-tracker.strategdzr.workers.dev';
   let cloud = null;
   let signedIn = false;
-  let loginOpen = false;
+  let loginPending = false;
+  let sessionTimer;
   let syncing = false;
   let change = 0;
   let formVersion = 0;
@@ -320,28 +322,98 @@
     $('cloudStatus').hidden = !message;
   }
   function cloudButtons() {
-    $('showLogin').hidden = signedIn || loginOpen || syncing;
-    $('cloudForm').hidden = signedIn || !loginOpen;
-    $('cloudControls').hidden = !signedIn;
-    $('connectCloud').disabled = syncing;
+    $('authGate').hidden = signedIn;
+    $('privateApp').hidden = !signedIn;
+    $('googleSignIn').hidden = syncing;
     $('downloadCloud').disabled = $('uploadCloud').disabled = $('logoutCloud').disabled = syncing;
+  }
+
+  function endSession(message = '') {
+    clearTimeout(sessionTimer);
+    cancelImport();
+    updatesRequest?.abort();
+    $('updatesStatus').textContent = '';
+    if ($('detailDialog').open) $('detailDialog').close();
+    $('detailContent').replaceChildren();
+    resetForm();
+    games = [];
+    render();
+    cloud = null;
+    signedIn = false;
+    sessionStorage.removeItem(googleSessionKey);
+    window.google?.accounts?.id?.disableAutoSelect();
+    $('loginStatus').textContent = message;
+    cloudButtons();
+    if (!$('googleSignIn').childElementCount) showGoogleSignIn();
+  }
+
+  function rememberGoogleSession(token) {
+    sessionStorage.setItem(googleSessionKey, token);
+    clearTimeout(sessionTimer);
+    // The authenticated catalog response has already verified this token.
+    const claims = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    sessionTimer = setTimeout(() => endSession('Сессия истекла. Войдите через Google повторно.'),
+      Math.min(2_147_483_647, Math.max(0, claims.exp * 1000 - Date.now())));
+  }
+
+  async function showGoogleSignIn() {
+    if (loginPending) return;
+    loginPending = true;
+    $('retryLogin').hidden = true;
+    try {
+      const response = await fetch(workerEndpoint + '/api/auth-config', {
+        signal: AbortSignal.timeout(10000), credentials: 'omit', redirect: 'error'
+      });
+      if (!response.ok) throw new Error('Google-вход пока недоступен.');
+      const { clientId } = await response.json();
+      if (!/^[\w-]+\.apps\.googleusercontent\.com$/.test(clientId || '')) throw new Error('Неверная конфигурация входа.');
+      if (!window.google?.accounts?.id) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://accounts.google.com/gsi/client';
+          script.async = true;
+          const timer = setTimeout(() => { script.remove(); reject(new Error('Google не ответил.')); }, 12000);
+          script.onload = () => { clearTimeout(timer); resolve(); };
+          script.onerror = () => { clearTimeout(timer); script.remove(); reject(new Error('Не удалось загрузить вход Google.')); };
+          document.head.append(script);
+        });
+      }
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: ({ credential }) => {
+          if (syncing || signedIn || typeof credential !== 'string') return;
+          cloud = { endpoint: workerEndpoint, token: credential };
+          $('loginStatus').textContent = 'Проверяем аккаунт Google…';
+          sync('connect');
+        }
+      });
+      $('googleSignIn').replaceChildren();
+      window.google.accounts.id.renderButton($('googleSignIn'), { theme: 'outline', size: 'large', locale: 'ru' });
+    } catch {
+      $('loginStatus').textContent = 'Не удалось открыть вход через Google. Повторите позже.';
+      $('retryLogin').hidden = false;
+    } finally {
+      loginPending = false;
+    }
   }
   async function sync(mode) {
     if (!cloud || syncing) return;
     syncing = true;
     cloudButtons();
-    const endpoint = cloud.endpoint;
+    const session = cloud;
+    const endpoint = session.endpoint;
     const start = change;
     let continueSaving = false;
     let checkOnConnect = false;
     cloudStatus('Связываемся с D1…');
     try {
       const remote = mode === 'auto' ? null : await api('/api/catalog');
+      if (cloud !== session) return;
       if (mode === 'connect') {
+        rememberGoogleSession(session.token);
         signedIn = true;
-        loginOpen = false;
-        $('accessToken').value = '';
-        sessionStorage.setItem(cloudKey, JSON.stringify(cloud));
+        games = load();
+        render();
       }
       const knownEndpoint = state.endpoint === endpoint;
       if (mode === 'download' || (mode === 'connect' &&
@@ -364,17 +436,19 @@
           method: 'PUT',
           body: JSON.stringify({ revision: remote?.revision ?? state.revision, games })
         });
+        if (cloud !== session) return;
         continueSaving = snapshot !== change;
         setState({ endpoint, revision: result.revision, dirty: continueSaving });
       }
       cloudStatus('Каталог синхронизирован с D1.');
       checkOnConnect = mode === 'connect';
     } catch (error) {
+      if (cloud !== session) return;
       if (error.status === 401) {
-        signedIn = false;
-        loginOpen = true;
-        cloud = null;
-        sessionStorage.removeItem(cloudKey);
+        endSession(error.message);
+      } else if (mode === 'connect' && !signedIn) {
+        $('loginStatus').textContent = error.status ? error.message : 'Не удалось открыть каталог. Повторите вход.';
+        showGoogleSignIn();
       }
       if (error.status === 409) setState({ endpoint, dirty: true });
       cloudStatus(error.status === 409
@@ -389,26 +463,8 @@
     if (checkOnConnect) checkUpdates();
   }
 
-  $('cloudForm').addEventListener('submit', event => {
-    event.preventDefault();
-    cloud = { endpoint: workerEndpoint, token: $('accessToken').value };
-    sync('connect');
-  });
-  $('showLogin').addEventListener('click', () => {
-    loginOpen = true;
-    cloudButtons();
-    $('accessToken').focus();
-  });
-  $('logoutCloud').addEventListener('click', () => {
-    cancelImport();
-    updatesRequest?.abort();
-    $('updatesStatus').textContent = '';
-    cloud = null;
-    signedIn = false;
-    sessionStorage.removeItem(cloudKey);
-    cloudStatus('');
-    cloudButtons();
-  });
+  $('retryLogin').addEventListener('click', () => showGoogleSignIn());
+  $('logoutCloud').addEventListener('click', () => endSession());
   $('downloadCloud').addEventListener('click', () => {
     if (!games.length || confirm('Заменить локальный каталог версией из D1?')) sync('download');
   });
@@ -417,8 +473,10 @@
   });
   window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(['home','orders','wishlist','add','settings'].includes(page))go(page)});
   const initial=location.hash.slice(1);go(['home','orders','wishlist','add','settings'].includes(initial)?initial:'home');render();
-  try { cloud = JSON.parse(sessionStorage.getItem(cloudKey)); } catch { /* local mode */ }
-  if (cloud?.endpoint !== workerEndpoint) cloud = null;
+  sessionStorage.removeItem(cloudKey);
+  const existingToken = sessionStorage.getItem(googleSessionKey);
+  if (existingToken) cloud = { endpoint: workerEndpoint, token: existingToken };
   cloudButtons();
   if (cloud) sync('connect');
+  else showGoogleSignIn();
 })();

@@ -8,7 +8,16 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <main class="app-shell" id="authGate">
+    <section class="settings-card">
+      <h1>My Board Games</h1>
+      <p>Войди через Google, чтобы открыть личный каталог.</p>
+      <div id="googleSignIn"></div>
+      <button type="button" class="secondary-button" id="retryLogin" hidden>Повторить</button>
+      <p id="loginStatus" role="status"></p>
+    </section>
+  </main>
+  <div class="app-shell" id="privateApp" hidden>
     <header class="topbar">
       <a class="brand" href="#home" aria-label="На главную">
         <span class="brand-mark">✦</span>
@@ -85,13 +94,7 @@
           <div class="settings-actions"><button class="primary-button" id="exportBtn">Экспорт JSON</button><label class="secondary-button file-label">Импорт JSON<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
         </div>
         <div class="settings-card">
-          <h3>Личный доступ</h3>
-          <button class="secondary-button" id="showLogin" type="button">Войти</button>
-          <form id="cloudForm" class="cloud-form" hidden>
-            <label>Ключ доступа<input id="accessToken" type="password" required minlength="32" autocomplete="current-password" autocapitalize="none"></label>
-            <button class="primary-button" type="submit" id="connectCloud">Войти</button>
-          </form>
-          <div id="cloudControls" hidden>
+          <div id="cloudControls">
             <h3>Облачное хранение</h3>
             <div class="settings-actions">
               <button class="secondary-button" type="button" id="downloadCloud">Загрузить из D1</button>
@@ -115,6 +118,6 @@
   </div>
   <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.1"></script>
+  <script src="./app.js?v=0.4.2"></script>
 </body>
 </html>

@@ -146,14 +146,66 @@ async function readKickstarterWidget(response, project) {
   };
 }
 
-async function authorized(request, secret) {
-  if (!secret || secret.length < 32) return false;
-  const encode = value => new TextEncoder().encode(value);
-  const [expected, supplied] = await Promise.all([
-    crypto.subtle.digest('SHA-256', encode(`Bearer ${secret}`)),
-    crypto.subtle.digest('SHA-256', encode(request.headers.get('authorization') || ''))
-  ]);
-  return crypto.subtle.timingSafeEqual(expected, supplied);
+const GOOGLE_CERTS = 'https://www.googleapis.com/oauth2/v3/certs';
+const GOOGLE_ALGORITHM = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
+let googleKeys = new Map();
+let googleKeysExpire = 0;
+
+function googleConfigured(env) {
+  return /^[\w-]+\.apps\.googleusercontent\.com$/.test(env.GOOGLE_CLIENT_ID || '') &&
+    /^[a-z0-9.]+@gmail\.com$/i.test(env.GOOGLE_OWNER_EMAIL || '');
+}
+
+function decodeBase64Url(part) {
+  return Uint8Array.from(atob(part.replace(/-/g, '+').replace(/_/g, '/')), char => char.charCodeAt(0));
+}
+
+async function googleKey(id) {
+  if (Date.now() >= googleKeysExpire) {
+    const response = await upstream(GOOGLE_CERTS, 'application/json', 5_000);
+    if (!response.ok) throw new Error('Google public keys unavailable');
+    const { keys } = JSON.parse(await readText(response, 32_000));
+    if (!Array.isArray(keys)) throw new Error('Invalid Google public keys');
+    const usable = keys.filter(key => key.kty === 'RSA' && key.use === 'sig' &&
+      (!key.alg || key.alg === 'RS256') && typeof key.kid === 'string');
+    if (!usable.length) throw new Error('Missing Google public keys');
+    const entries = await Promise.all(usable.map(async key => [
+      key.kid, await crypto.subtle.importKey('jwk', key, GOOGLE_ALGORITHM, false, ['verify'])
+    ]));
+    const maxAge = Number(response.headers.get('cache-control')?.match(/\bmax-age=(\d+)/i)?.[1] || 0);
+    googleKeys = new Map(entries);
+    googleKeysExpire = Date.now() + Math.min(maxAge, 3600) * 1000;
+  }
+  return googleKeys.get(id);
+}
+
+async function authorized(request, env) {
+  const authorization = request.headers.get('authorization') || '';
+  if (authorization.length > 8192) return false;
+  const match = authorization.match(/^Bearer ([\w-]+)\.([\w-]+)\.([\w-]+)$/);
+  if (!match) return false;
+  const [, encodedHeader, encodedClaims, encodedSignature] = match;
+  let header;
+  let claims;
+  let signature;
+  try {
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    header = JSON.parse(decoder.decode(decodeBase64Url(encodedHeader)));
+    claims = JSON.parse(decoder.decode(decodeBase64Url(encodedClaims)));
+    signature = decodeBase64Url(encodedSignature);
+  } catch { return false; }
+  const now = Math.floor(Date.now() / 1000);
+  if (header?.alg !== 'RS256' || header.crit !== undefined ||
+      typeof header.kid !== 'string' || !/^[a-z\d_-]{1,128}$/i.test(header.kid) ||
+      !['accounts.google.com', 'https://accounts.google.com'].includes(claims?.iss) ||
+      claims.aud !== env.GOOGLE_CLIENT_ID || (claims.azp !== undefined && claims.azp !== env.GOOGLE_CLIENT_ID) ||
+      !Number.isSafeInteger(claims.exp) || claims.exp <= now ||
+      !Number.isSafeInteger(claims.iat) || claims.iat > now + 60 || claims.iat >= claims.exp ||
+      typeof claims.sub !== 'string' || !claims.sub || claims.email_verified !== true ||
+      typeof claims.email !== 'string' || claims.email.toLowerCase() !== env.GOOGLE_OWNER_EMAIL.toLowerCase()) return false;
+  const key = await googleKey(header.kid);
+  return !!key && await crypto.subtle.verify(GOOGLE_ALGORITHM.name, key, signature,
+    new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`));
 }
 
 export default {
@@ -168,8 +220,16 @@ export default {
     headers['Access-Control-Allow-Headers'] = 'Authorization, Content-Type';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const url = new URL(request.url);
-    if (!['/api/import', '/api/catalog'].includes(url.pathname)) return json({ error: 'Маршрут не найден.' }, 404);
-    if (!await authorized(request, env.ACCESS_TOKEN)) return json({ error: 'Проверьте ключ доступа.' }, 401);
+    if (!['/api/auth-config', '/api/import', '/api/catalog'].includes(url.pathname)) return json({ error: 'Маршрут не найден.' }, 404);
+    if (!googleConfigured(env)) return json({ error: 'Вход через Google пока не настроен.' }, 503);
+    if (url.pathname === '/api/auth-config' && request.method === 'GET') {
+      return json({ clientId: env.GOOGLE_CLIENT_ID });
+    }
+    try {
+      if (!await authorized(request, env)) return json({ error: 'Войдите через разрешённый Google-аккаунт. Если сессия истекла, войдите повторно.' }, 401);
+    } catch {
+      return json({ error: 'Проверка входа Google временно недоступна. Повторите позже.' }, 503);
+    }
     let operation;
     if (request.method === 'GET') operation = url.pathname === '/api/import' ? 'import' : 'read';
     if (request.method === 'PUT' && url.pathname === '/api/catalog') operation = 'write';
