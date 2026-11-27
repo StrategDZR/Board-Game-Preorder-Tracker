@@ -177,7 +177,7 @@
   }
   document.querySelectorAll('[data-page]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();navigate(a.dataset.page)}));
   document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
-  function platformFromUrl(url){const u=(url||'').toLowerCase();if(u.includes('kickstarter.com'))return 'Kickstarter';if(u.includes('gamefound.com'))return 'Gamefound';if(u.includes('lavka.games')||u.includes('lavkaigr.ru'))return 'Lavka Games';if(u.includes('gaga.ru')||u.includes('gagagames'))return 'GaGa Games';return ''}
+  function platformFromUrl(url){const u=(url||'').toLowerCase();if(u.includes('kickstarter.com'))return 'Kickstarter';if(u.includes('gamefound.com'))return 'Gamefound';if(u.includes('lavka.games')||u.includes('lavkaigr.ru'))return 'Lavka Games';if(u.includes('gaga.ru')||u.includes('gagagames')||u.includes('gaga-games.com'))return 'GaGa Games';return ''}
   $('url').addEventListener('change',()=>{const p=platformFromUrl($('url').value);if(p)$('platform').value=p});
   function showTypeFields() {
     const isOrder = $('type').value === 'order';
@@ -470,9 +470,11 @@
       const campaignUrl = updateProject(publicUrl.href);
       const path = publicUrl.pathname;
       const gaga = ['gaga.ru', 'www.gaga.ru'].includes(publicUrl.hostname) && /^\/game\/[a-z\d][a-z\d_-]*\/?$/i.test(path);
+      const gagaPreorder = ['gaga-games.com', 'www.gaga-games.com'].includes(publicUrl.hostname) &&
+        /^\/preorder\/[a-z\d][a-z\d_-]*\/?$/i.test(path);
       const lavka = ['lavkaigr.ru', 'www.lavkaigr.ru'].includes(publicUrl.hostname) &&
         /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(path) && !/^\/shop\/factory\//i.test(path);
-      if (campaignUrl || gaga || lavka) {
+      if (campaignUrl || gaga || gagaPreorder || lavka) {
         return api('/api/import?url=' + encodeURIComponent(campaignUrl || publicUrl.origin + path), { signal });
       }
     }

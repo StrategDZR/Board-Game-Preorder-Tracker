@@ -68,6 +68,11 @@ function storeFromUrl(url) {
     const product = url.pathname.match(/^\/game\/([a-z\d][a-z\d_-]*)\/?$/i);
     return { platform: 'GaGa Games', store: true, url: product ? `https://gaga.ru/game/${product[1]}/` : '' };
   }
+  if (['gaga-games.com', 'www.gaga-games.com'].includes(url.hostname)) {
+    const product = url.pathname.match(/^\/preorder\/([a-z\d][a-z\d_-]*)\/?$/i);
+    return { platform: 'GaGa Games', store: true, preorder: true, url: product ?
+      `https://www.gaga-games.com/preorder/${product[1]}/` : '' };
+  }
   if (['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) &&
       /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(url.pathname) &&
       !/^\/shop\/factory\//i.test(url.pathname)) {
@@ -152,7 +157,9 @@ async function importPublicPage(project) {
       element(el) { set(el.getAttribute('itemprop'), el.getAttribute('content')); }
     });
   }
-  const body = rewriter.transform(new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })).body;
+  const headEnd = project.preorder ? html.search(/<\/head\s*>/i) : -1;
+  const markup = headEnd >= 0 ? html.slice(0, headEnd) + '</head>' : html;
+  const body = rewriter.transform(new Response(markup, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })).body;
   for await (const chunk of body) { /* Consume rewritten HTML to collect fields. */ }
   const identity = fields.get('og:url') || fields.get('canonical');
   if (!identity) return null;
@@ -161,8 +168,10 @@ async function importPublicPage(project) {
   if (project.platform === 'Lavka Games' && canonical.protocol === 'http:') canonical.protocol = 'https:';
   if (campaign(canonical.href)?.url !== project.url ||
       (!project.store && !/^\/(?:[a-z]{2}\/)?projects\/[^/]+\/[^/]+\/?$/i.test(canonical.pathname))) return null;
-  const title = clean((name.trim() || fields.get('og:title') || '').replace(/\s+/g, ' '), 300);
-  if (!title || (['GaGa Games', 'Lavka Games'].includes(project.platform) && !name.trim())) return null;
+  const pageTitle = fields.get('og:title') || '';
+  const title = clean((project.preorder ? pageTitle.replace(/\s+[-–—|]\s+GaGa Games\s*$/i, '') :
+    name.trim() || pageTitle).replace(/\s+/g, ' '), 300);
+  if (!title || (!project.preorder && ['GaGa Games', 'Lavka Games'].includes(project.platform) && !name.trim())) return null;
   const currency = fields.get('og:price:currency') || fields.get('storeCurrency') || fields.get('priceCurrency');
   const price = fields.get('og:price:amount') || fields.get('storePrice') || fields.get('price');
   const hasPrice = project.store && CURRENCIES.includes(currency) &&
@@ -171,7 +180,7 @@ async function importPublicPage(project) {
     name: title,
     cover: httpsImage(fields.get('og:image:secure_url') || fields.get('og:image'), project.url),
     description: clean(fields.get('og:description'), 5000),
-    publisher: clean(fields.get('brand') || fields.get('vendor'), 300),
+    publisher: project.preorder ? project.platform : clean(fields.get('brand') || fields.get('vendor'), 300),
     price: hasPrice ? price : '',
     currency: hasPrice ? currency : ''
   };
