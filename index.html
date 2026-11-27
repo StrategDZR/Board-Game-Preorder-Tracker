@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111311">
   <title>My Board Games Preorders</title>
-  <link rel="stylesheet" href="./style.css?v=0.4.8">
+  <link rel="stylesheet" href="./style.css?v=0.4.9">
 </head>
 <body>
   <main class="app-shell" id="authGate">
@@ -76,7 +76,8 @@
           <label id="releaseDateField" hidden>Дата релиза<input id="releaseDate" type="date" disabled></label>
           <fieldset id="orderFields" class="order-fields">
             <label>Статус<select id="status"><option value="campaign">Кампания / предзаказ</option><option value="production">Производство</option><option value="shipping">Отправлено</option><option value="delivered">Доставлено</option><option value="paused">Приостановлено</option></select></label>
-            <label>Ожидаемая доставка<input id="eta" type="text" placeholder="Например, март 2027"></label>
+            <label>Ожидаемая доставка<input id="eta" type="date"></label>
+            <p class="hint" id="legacyEta" hidden>Ранее указано: <span id="legacyEtaValue"></span> <button type="button" class="text-button" id="clearLegacyEta">Убрать</button></p>
             <label>Фактически отправлено<input id="actualShipDate" type="date"></label>
             <label>Фактически получено<input id="actualDeliveryDate" type="date"></label>
             <label>Стоимость доставки<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
@@ -117,8 +118,19 @@
       <a href="#settings" data-page="settings" class="nav-item"><span>⚙</span><small>Ещё</small></a>
     </nav>
   </div>
-  <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
+  <dialog id="detailDialog" class="detail-dialog">
+    <div id="detailContent"></div>
+    <button type="button" class="secondary-button dialog-close" id="closeDialog">Закрыть</button>
+    <section id="deletePrompt" hidden>
+      <h2 id="deletePromptTitle">Удалить игру?</h2>
+      <p>Запись «<strong id="deleteGameName"></strong>» исчезнет из каталога.</p>
+      <div class="detail-actions">
+        <button type="button" class="secondary-button" id="cancelDelete">Отмена</button>
+        <button type="button" class="secondary-button danger-button" id="confirmDelete">Да, удалить</button>
+      </div>
+    </section>
+  </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.8"></script>
+  <script src="./app.js?v=0.4.9"></script>
 </body>
 </html>

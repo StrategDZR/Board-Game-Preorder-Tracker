@@ -4,6 +4,8 @@
   const cacheContext = new TextEncoder().encode('Board Game Preorder Tracker catalog cache v1');
   let games = [];
   let editingId = null;
+  let legacyEta = '';
+  let pendingDeleteId = null;
   const $ = id => document.getElementById(id);
   const fields = ['url', 'name', 'type', 'platform', 'price', 'currency', 'notes', 'cover', 'publisher', 'description'];
   const orderFields = ['status', 'shipping', 'eta', 'actualShipDate', 'actualDeliveryDate', 'campaignEnd'];
@@ -150,14 +152,26 @@
     $('formNote').textContent = 'Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.';
   }
   $('url').addEventListener('input', cancelImport);
+  function showLegacyEta() {
+    $('legacyEta').hidden = !legacyEta || !!$('eta').value;
+    $('legacyEtaValue').textContent = legacyEta;
+  }
+  $('eta').addEventListener('input', showLegacyEta);
+  $('clearLegacyEta').addEventListener('click', () => {
+    legacyEta = '';
+    showLegacyEta();
+    $('eta').focus();
+  });
   function resetForm(type = 'order') {
     editingId = null;
+    legacyEta = '';
     cancelImport();
     $('gameForm').reset();
     $('gameId').value = '';
     $('formTitle').textContent = 'Добавить игру';
     $('type').value = type;
     showTypeFields();
+    showLegacyEta();
     $('cancelEdit').hidden = true;
   }
   $('cancelEdit').addEventListener('click', () => {
@@ -172,6 +186,7 @@
     const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : [...fields, 'releaseDate'];
     const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
     if (!values.name) return;
+    if (values.type === 'order' && !values.eta) values.eta = legacyEta;
     const game = { ...games[index], ...values, id, updated: Date.now() };
     if (index >= 0) games[index] = game;
     else games.unshift(game);
@@ -183,6 +198,7 @@
   function showDetail(id) {
     const g = games.find(game => game.id === id);
     if (!g) return;
+    showDeletePrompt(null);
     const d = $('detailContent');
     const url = webUrl(g.url);
     const order = g.type === 'order';
@@ -193,14 +209,36 @@
       editGame(g);
     };
     if (!order) $('moveToOrders').onclick = () => moveToOrders(id);
-    $('deleteGame').onclick = () => {
-      if (!confirm('Удалить эту запись?')) return;
-      games = games.filter(game => game.id !== id);
-      save();
-      $('detailDialog').close();
-      toast('Запись удалена');
-    };
+    $('deleteGame').onclick = () => showDeletePrompt(g);
   }
+
+  function showDeletePrompt(game) {
+    pendingDeleteId = game?.id ?? null;
+    $('detailContent').hidden = !!game;
+    $('closeDialog').hidden = !!game;
+    $('deletePrompt').hidden = !game;
+    $('deleteGameName').textContent = game?.name ?? '';
+    if (game) {
+      $('detailDialog').setAttribute('aria-labelledby', 'deletePromptTitle');
+      $('cancelDelete').focus();
+    } else {
+      $('detailDialog').removeAttribute('aria-labelledby');
+    }
+  }
+  $('cancelDelete').addEventListener('click', () => {
+    showDeletePrompt(null);
+    $('deleteGame')?.focus();
+  });
+  $('confirmDelete').addEventListener('click', () => {
+    const index = games.findIndex(game => game.id === pendingDeleteId);
+    if (index < 0) return;
+    games.splice(index, 1);
+    showDeletePrompt(null);
+    $('detailDialog').close();
+    save();
+    toast('Запись удалена');
+  });
+  $('detailDialog').addEventListener('close', () => showDeletePrompt(null));
 
   function moveToOrders(id) {
     const game = games.find(entry => entry.id === id && entry.type === 'wishlist');
@@ -221,7 +259,9 @@
     for (const id of [...fields, ...orderFields, 'releaseDate']) {
       if (id !== 'status' || Object.hasOwn(statusLabels, game.status)) $(id).value = game[id] ?? '';
     }
+    if (!$('eta').value && typeof game.eta === 'string') legacyEta = game.eta;
     showTypeFields();
+    showLegacyEta();
     $('cancelEdit').hidden = false;
     go('add');
   }
