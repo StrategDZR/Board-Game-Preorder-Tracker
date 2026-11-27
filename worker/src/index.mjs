@@ -75,6 +75,9 @@ function storeFromUrl(url) {
     return { platform: 'GaGa Games', store: true, preorder: true, slug: product?.[1], url: product ?
       `https://www.gaga-games.com/preorder/${product[1]}/` : '' };
   }
+  if (['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) && /^\/projects\/[a-z\d][a-z\d_-]*\/?$/i.test(url.pathname)) {
+    return { platform: 'Lavka Games', lavkaProject: true, url: 'https://www.lavkaigr.ru' + url.pathname.replace(/\/?$/, '/') };
+  }
   if (['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) &&
       /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(url.pathname) &&
       !/^\/shop\/factory\//i.test(url.pathname)) {
@@ -158,6 +161,69 @@ async function importGaGaPreorder(project) {
     }
   } catch { /* The campaign metadata remains available if the schedule fails. */ }
   return page;
+}
+
+function lavkaWarehouseEstimate(text) {
+  const match = text.match(/поступлени[ея]\s+на\s+склад\s*:\s*(зима|весна|лето|осень|[а-яё]+)\s+(20\d{2})/i);
+  if (!match) return '';
+  const term = match[1].toLowerCase();
+  const season = { зима: 'winter', весна: 'spring', лето: 'summer', осень: 'autumn' }[term];
+  if (season) return `${match[2]}-${season}`;
+  const month = GAGA_MONTHS.indexOf(term) + 1;
+  return month ? `${match[2]}-${String(month).padStart(2, '0')}` : '';
+}
+
+async function importLavkaProject(project) {
+  const response = await upstream(project.url, 'text/html', 4_000);
+  if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('text/html')) {
+    await response.body?.cancel();
+    return null;
+  }
+  const html = await readText(response, MAX_SOURCE_BYTES);
+  const projectPath = new URL(project.url).pathname;
+  const meta = new Map();
+  const items = [];
+  let warehouse = '';
+  let lot;
+  const rewriter = new HTMLRewriter()
+    .on('head meta[property^="og:"]', { element(el) { meta.set(el.getAttribute('property'), el.getAttribute('content')); } })
+    .on('.date_warehouse .date-to', { text(chunk) { if (warehouse.length < 300) warehouse += chunk.text; } })
+    .on('.select-awards-box .item2', {
+      element(el) {
+        lot = { description: '' };
+        el.onEndTag(() => {
+          if (lot?.name && items.length < 30) {
+            lot.eta = lavkaWarehouseEstimate(lot.description);
+            lot.description = clean(lot.description.replace(/(?:примерный|ориентировочный) срок поступления на склад\s*:[^.]+\.?\s*$/i, ''), 5000);
+            items.push(lot);
+          }
+          lot = null;
+        });
+      }
+    })
+    .on('.select-awards-box .item2 .buy-reward-mini', {
+      element(el) {
+        if (!lot || el.getAttribute('data-url') !== projectPath) return;
+        lot.name = clean(el.getAttribute('data-name'), 300);
+        lot.cover = httpsImage(el.getAttribute('data-img'), project.url);
+      }
+    })
+    .on('.select-awards-box .item2 .annotation2', { text(chunk) { if (lot && lot.description.length < 5000) lot.description += chunk.text; } })
+    .on('.select-awards-box .item2 .annotation2 br', { element() { if (lot) lot.description += '\n'; } });
+  const body = rewriter.transform(new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })).body;
+  for await (const chunk of body) { /* Consume the transformed HTML. */ }
+  const canonical = new URL(meta.get('og:url') || '/', project.url);
+  if (canonical.protocol === 'http:') canonical.protocol = 'https:';
+  const name = clean(meta.get('og:title'), 300);
+  if (!name || campaign(canonical.href)?.url !== project.url) return null;
+  return {
+    name,
+    cover: httpsImage(meta.get('og:image'), project.url),
+    description: clean((meta.get('og:description') || '').replace(/<br\s*\/?>|&lt;br\s*\/?&gt;/gi, '\n'), 5000),
+    publisher: project.platform,
+    eta: lavkaWarehouseEstimate(warehouse),
+    items
+  };
 }
 
 async function importPublicPage(project) {
@@ -390,7 +456,8 @@ export default {
       if (!project) return json({ error: 'Вставьте HTTPS-ссылку на публичную кампанию или товар поддерживаемого магазина. Для закрытого заказа используйте импорт из HTML.' }, 400);
       if (!project.url) return json({ error: 'Откройте конкретную игру в магазине и вставьте ссылку на её страницу.' }, 400);
       try {
-        const data = await (project.preorder ? importGaGaPreorder(project) : project.store ? importPublicPage(project) :
+        const data = await (project.lavkaProject ? importLavkaProject(project) :
+          project.preorder ? importGaGaPreorder(project) : project.store ? importPublicPage(project) :
           project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
         if (data?.rateLimited) return json({ error: 'Достигнут бесплатный лимит резервного источника Kickstarter. Попробуйте позже или заполните карточку вручную.' }, 429);
         if (data?.name) return json({ ...data, platform: project.platform });

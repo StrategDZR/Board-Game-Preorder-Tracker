@@ -10,6 +10,7 @@
 .form-card input:is([type="date"], [type="month"]) { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; }
 .form-card .delivery-month-mode { display: flex; align-items: center; gap: 8px; }
 .delivery-month-mode input[type="checkbox"] { width: auto; margin: 0; padding: 0; accent-color: var(--gold); }
+#refineEta { margin: 0 0 14px; padding: 0; }
 @media (max-width: 649px), (pointer: coarse) {
   .form-card input, .form-card select, .form-card textarea, .search { font-size: 16px; }
 }

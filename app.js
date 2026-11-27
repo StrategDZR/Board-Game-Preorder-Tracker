@@ -106,6 +106,8 @@
   const deliveryMonthLabel = new Intl.DateTimeFormat('ru', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const dayMs = 86_400_000;
   const isDeliveryMonth = value => /^(?!0000)\d{4}-(?:0[1-9]|1[0-2])$/.test(value);
+  const deliverySeason = value => /^(20\d{2})-(winter|spring|summer|autumn)$/.exec(value);
+  const seasonLabels = { winter: 'зима', spring: 'весна', summer: 'лето', autumn: 'осень' };
 
   function deliveryDate(value) {
     if (typeof value !== 'string' || !/^(?!0000)\d{4}-\d{2}(?:-\d{2})?$/.test(value)) return null;
@@ -115,6 +117,8 @@
   }
 
   function formatDeliveryDate(value) {
+    const season = deliverySeason(value);
+    if (season) return `${seasonLabels[season[2]]} ${season[1]}`;
     const date = deliveryDate(value);
     return date && isDeliveryMonth(value) ? deliveryMonthLabel.format(date) : value;
   }
@@ -239,10 +243,20 @@
   }
   $('url').addEventListener('input', cancelImport);
   function setDeliveryInput(value, month = isDeliveryMonth(value)) {
+    const seasonal = Boolean(deliverySeason(value));
     $('etaMonthMode').checked = month;
-    $('eta').type = month ? 'month' : 'date';
-    $('eta').value = value;
+    $('etaMonthMode').parentElement.hidden = seasonal;
+    $('refineEta').hidden = !seasonal;
+    $('eta').type = seasonal ? 'text' : month ? 'month' : 'date';
+    $('eta').readOnly = seasonal;
+    $('eta').value = seasonal ? formatDeliveryDate(value) : value;
+    if (seasonal) $('eta').dataset.season = value;
+    else delete $('eta').dataset.season;
   }
+  $('refineEta').addEventListener('click', () => {
+    setDeliveryInput('');
+    $('eta').focus();
+  });
   $('etaMonthMode').addEventListener('change', () => {
     const month = $('etaMonthMode').checked;
     setDeliveryInput(month ? $('eta').value.slice(0, 7) : '', month);
@@ -251,7 +265,7 @@
     return catalog.map(game => {
       const { eta, ...rest } = game;
       if (eta === undefined || eta === '') return game;
-      if (deliveryDate(eta)) return game;
+      if (deliveryDate(eta) || deliverySeason(eta)) return game;
       return rest;
     });
   }
@@ -277,8 +291,9 @@
     const index = games.findIndex(game => game.id === id);
     const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : [...fields, 'releaseDate'];
     const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
+    if (values.type === 'order' && $('eta').dataset.season) values.eta = $('eta').dataset.season;
     if (!values.name) return;
-    if (values.eta && !deliveryDate(values.eta)) {
+    if (values.eta && !deliveryDate(values.eta) && !deliverySeason(values.eta)) {
       toast('Укажите срок доставки в календаре.');
       $('eta').focus();
       return;
@@ -506,7 +521,8 @@
       const gagaPreorder = ['gaga-games.com', 'www.gaga-games.com'].includes(publicUrl.hostname) &&
         /^\/preorder\/[a-z\d][a-z\d_-]*\/?$/i.test(path);
       const lavka = ['lavkaigr.ru', 'www.lavkaigr.ru'].includes(publicUrl.hostname) &&
-        /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(path) && !/^\/shop\/factory\//i.test(path);
+        (/^\/projects\/[a-z\d][a-z\d_-]*\/?$/i.test(path) ||
+          (/^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(path) && !/^\/shop\/factory\//i.test(path)));
       if (campaignUrl || gaga || gagaPreorder || lavka) {
         return api('/api/import?url=' + encodeURIComponent(campaignUrl || publicUrl.origin + path), { signal });
       }
@@ -572,7 +588,9 @@
       delete importedOrderFields.currency;
     }
     for (const [id, value] of Object.entries(importedOrderFields)) {
-      if ($(id).value === value) $(id).value = '';
+      if ($(id).value !== value) continue;
+      if (id === 'eta') setDeliveryInput('');
+      else $(id).value = '';
     }
     importedOrderFields = fillImportedFields(item, readImportFields());
     $('formNote').textContent = 'Данные товара подставлены в пустые поля. Проверьте форму и нажмите «Сохранить игру».';
@@ -682,10 +700,12 @@
     return items;
   }
 
-  function previewOrderItems(items) {
+  function previewOrderItems(items, forceOrder = true) {
     orderItems = items;
-    $('type').value = 'order';
-    showTypeFields();
+    if (forceOrder) {
+      $('type').value = 'order';
+      showTypeFields();
+    }
     if (items.length === 1) {
       showImportedOrderItem(0);
       return;
@@ -693,7 +713,7 @@
     const select = $('orderItem');
     select.add(new Option('Выберите товар', ''));
     select.options[0].disabled = true;
-    items.forEach((item, index) => select.add(new Option(item.name, String(index))));
+    items.forEach((item, index) => select.add(new Option(item.label || item.name, String(index))));
     $('orderItemField').hidden = false;
     $('formNote').textContent = 'Выберите товар. Каждая карточка хранит одну игру.';
   }
@@ -932,7 +952,7 @@
     const filled = {};
     const fill = (id, value) => {
       if (id === 'eta') {
-        if (!deliveryDate(value)) return;
+        if (!deliveryDate(value) && !deliverySeason(value)) return;
         setDeliveryInput(value);
       } else $(id).value = value;
       if ($(id).value) filled[id] = $(id).value;
@@ -972,9 +992,15 @@
     try {
       const result = await importMetadata(url, controller.signal);
       if (version !== formVersion) return;
-      fillImportedFields(result, before);
+      importedOrderFields = fillImportedFields(result, before);
       note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.' +
         (typeof result.sourceNote === 'string' ? ' ' + result.sourceNote : '');
+      if (Array.isArray(result.items) && result.items.length) {
+        const project = { ...result, label: 'Вся кампания' };
+        previewOrderItems([project, ...result.items.map(item => ({ platform: result.platform, publisher: result.publisher, ...item }))], false);
+        $('orderItem').value = '0';
+        note.textContent = 'Данные кампании подставлены. При необходимости выберите отдельный лот.';
+      }
     } catch (error) {
       if (version === formVersion) note.textContent = error.status ? error.message
         : 'Не удалось связаться с Cloudflare. Проверьте подключение и повторите позже. Если исчерпана дневная квота, она обновится в 00:00 UTC.';

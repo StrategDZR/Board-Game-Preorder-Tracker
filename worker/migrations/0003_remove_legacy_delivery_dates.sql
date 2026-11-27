@@ -8,7 +8,8 @@ checked AS (
     json_type(game, '$.eta') IS NOT NULL AND eta IS NOT '' AND (
       typeof(eta) <> 'text' OR substr(eta, 1, 4) = '0000' OR NOT (
         (eta GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(eta, '+0 days') IS eta) OR
-        (eta GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND date(eta || '-01', '+0 days') IS (eta || '-01'))
+        (eta GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND date(eta || '-01', '+0 days') IS (eta || '-01')) OR
+        (substr(eta, 1, 4) GLOB '20[0-9][0-9]' AND substr(eta, 5) IN ('-winter', '-spring', '-summer', '-autumn'))
       )
     )
   ) AS invalid_eta
