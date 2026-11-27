@@ -77,7 +77,6 @@
           <fieldset id="orderFields" class="order-fields">
             <label>Статус<select id="status"><option value="campaign">Кампания / предзаказ</option><option value="production">Производство</option><option value="shipping">Отправлено</option><option value="delivered">Доставлено</option><option value="paused">Приостановлено</option></select></label>
             <label>Ожидаемая доставка<input id="eta" type="date"></label>
-            <p class="hint" id="legacyEta" hidden>Ранее указано: <span id="legacyEtaValue"></span> <button type="button" class="text-button" id="clearLegacyEta">Убрать</button></p>
             <label>Фактически отправлено<input id="actualShipDate" type="date"></label>
             <label>Фактически получено<input id="actualDeliveryDate" type="date"></label>
             <label>Стоимость доставки<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
@@ -131,6 +130,6 @@
     </section>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.9"></script>
+  <script src="./app.js?v=0.4.10"></script>
 </body>
 </html>

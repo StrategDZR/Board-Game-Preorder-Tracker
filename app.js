@@ -4,7 +4,6 @@
   const cacheContext = new TextEncoder().encode('Board Game Preorder Tracker catalog cache v1');
   let games = [];
   let editingId = null;
-  let legacyEta = '';
   let pendingDeleteId = null;
   const $ = id => document.getElementById(id);
   const fields = ['url', 'name', 'type', 'platform', 'price', 'currency', 'notes', 'cover', 'publisher', 'description'];
@@ -152,26 +151,25 @@
     $('formNote').textContent = 'Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.';
   }
   $('url').addEventListener('input', cancelImport);
-  function showLegacyEta() {
-    $('legacyEta').hidden = !legacyEta || !!$('eta').value;
-    $('legacyEtaValue').textContent = legacyEta;
+  function normalizeDeliveryDates(catalog) {
+    return catalog.map(game => {
+      const { eta, ...rest } = game;
+      if (eta === undefined || eta === '') return game;
+      if (typeof eta === 'string' && /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(eta)) {
+        const date = new Date(eta + 'T00:00:00Z');
+        if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === eta) return game;
+      }
+      return rest;
+    });
   }
-  $('eta').addEventListener('input', showLegacyEta);
-  $('clearLegacyEta').addEventListener('click', () => {
-    legacyEta = '';
-    showLegacyEta();
-    $('eta').focus();
-  });
   function resetForm(type = 'order') {
     editingId = null;
-    legacyEta = '';
     cancelImport();
     $('gameForm').reset();
     $('gameId').value = '';
     $('formTitle').textContent = 'Добавить игру';
     $('type').value = type;
     showTypeFields();
-    showLegacyEta();
     $('cancelEdit').hidden = true;
   }
   $('cancelEdit').addEventListener('click', () => {
@@ -186,7 +184,6 @@
     const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : [...fields, 'releaseDate'];
     const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
     if (!values.name) return;
-    if (values.type === 'order' && !values.eta) values.eta = legacyEta;
     const game = { ...games[index], ...values, id, updated: Date.now() };
     if (index >= 0) games[index] = game;
     else games.unshift(game);
@@ -259,16 +256,14 @@
     for (const id of [...fields, ...orderFields, 'releaseDate']) {
       if (id !== 'status' || Object.hasOwn(statusLabels, game.status)) $(id).value = game[id] ?? '';
     }
-    if (!$('eta').value && typeof game.eta === 'string') legacyEta = game.eta;
     showTypeFields();
-    showLegacyEta();
     $('cancelEdit').hidden = false;
     go('add');
   }
   $('closeDialog').addEventListener('click',()=>$('detailDialog').close());
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
   $('exportBtn').addEventListener('click',exportJson);$('backupBtn').addEventListener('click',exportJson);
-  $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){catalogGeneration++;const ids=new Set();games=incoming.map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
+  $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){catalogGeneration++;const ids=new Set();games=normalizeDeliveryDates(incoming).map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
   function cloudResponseMessage(status, body, data) {
     if (typeof data?.error === 'string') return data.error;
     if (/\b(?:error\s+(?:code\s*)?:?\s*1027|daily request limit)\b/i.test(body)) {
@@ -715,7 +710,7 @@
         if (cloud !== session) return;
         localKey = key;
         state = snapshot.state;
-        games = snapshot.games;
+        games = normalizeDeliveryDates(snapshot.games);
         rememberGoogleSession(session.token);
         signedIn = true;
         render();
@@ -724,7 +719,7 @@
       if (mode === 'download' || (mode === 'connect' &&
           (knownEndpoint && !state.dirty || !knownEndpoint && !games.length))) {
         if (change !== start) throw new Error('Локальный каталог изменился. Повторите загрузку.');
-        games = remote.games;
+        games = normalizeDeliveryDates(remote.games);
         catalogGeneration++;
         if (editingId) resetForm();
         if ($('detailDialog').open) $('detailDialog').close();
