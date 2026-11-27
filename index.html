@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111311">
   <title>My Board Games Preorders</title>
-  <link rel="stylesheet" href="./style.css?v=0.4.18">
+  <link rel="stylesheet" href="./style.css?v=0.4.20">
 </head>
 <body>
   <main class="app-shell" id="authGate">
@@ -18,14 +18,6 @@
     </section>
   </main>
   <div class="app-shell" id="privateApp" hidden>
-    <header class="topbar">
-      <a class="brand" href="#home" aria-label="На главную">
-        <span class="brand-mark">✦</span>
-        <span><b>MY BOARD GAMES</b><small>PREORDERS</small></span>
-      </a>
-      <button class="icon-button" id="backupBtn" title="Резервная копия" aria-label="Резервная копия">↥</button>
-    </header>
-
     <main>
       <section class="page active" id="page-home">
         <div class="eyebrow">ТВОЯ КОЛЛЕКЦИЯ</div>
@@ -43,8 +35,12 @@
         <div class="eyebrow">ТВОИ ПРОЕКТЫ</div><h1>Предзаказы</h1>
         <div class="toolbar"><input id="orderSearch" class="search" placeholder="Найти игру…" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
         <div id="orderPublishers" class="publisher-filters" role="group" aria-label="Фильтр по издателям" hidden></div>
-        <button type="button" class="secondary-button" id="checkUpdates">Проверить сейчас</button>
-        <p id="updatesStatus" class="form-note" role="status"></p>
+        <label class="catalog-sort">По сроку доставки
+          <select id="orderSort">
+            <option value="nearest">Ближайшие сначала</option>
+            <option value="farthest">Дальние сначала</option>
+          </select>
+        </label>
         <div id="ordersList" class="card-list"></div>
         <p class="filter-empty" id="ordersNoMatches" role="status" hidden>По выбранным фильтрам ничего не найдено.</p>
         <div id="ordersEmpty" class="empty-state"><div class="empty-icon">♧</div><b>Предзаказов пока нет</b><p>Добавь игру по ссылке или вручную.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
@@ -54,6 +50,12 @@
         <div class="eyebrow">КОГДА-НИБУДЬ В КОЛЛЕКЦИИ</div><h1>Wishlist</h1>
         <div class="toolbar"><input id="wishSearch" class="search" placeholder="поиск по вишлисту" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
         <div id="wishlistPublishers" class="publisher-filters" role="group" aria-label="Фильтр по издателям" hidden></div>
+        <label class="catalog-sort">По дате релиза
+          <select id="wishSort">
+            <option value="nearest">Ближайшие сначала</option>
+            <option value="farthest">Дальние сначала</option>
+          </select>
+        </label>
         <div id="wishlistList" class="card-list"></div>
         <p class="filter-empty" id="wishlistNoMatches" role="status" hidden>По выбранным фильтрам ничего не найдено.</p>
         <div id="wishlistEmpty" class="empty-state"><div class="empty-icon">♡</div><b>Список желаний пуст</b><p>Сохраняй игры, которые хочешь приобрести.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
@@ -108,6 +110,11 @@
       <section class="page" id="page-settings">
         <div class="eyebrow">ДАННЫЕ И ПРИЛОЖЕНИЕ</div><h1>Настройки</h1>
         <div class="settings-card">
+          <h3>Обновления кампаний</h3>
+          <button type="button" class="secondary-button" id="checkUpdates">Проверить сейчас</button>
+          <p id="updatesStatus" class="form-note" role="status"></p>
+        </div>
+        <div class="settings-card">
           <h3>Резервная копия</h3><p>Сохрани каталог в JSON-файл или восстанови его на другом устройстве.</p>
           <div class="settings-actions"><button class="primary-button" id="exportBtn">Экспорт JSON</button><label class="secondary-button file-label">Импорт JSON<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
         </div>
@@ -148,6 +155,6 @@
     </section>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.19"></script>
+  <script src="./app.js?v=0.4.20"></script>
 </body>
 </html>

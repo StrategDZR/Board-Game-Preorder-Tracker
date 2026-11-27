@@ -148,14 +148,25 @@
     return { start: +start, end };
   }
 
+  function orderDeliveryWindow(game) {
+    return game.status === 'delivered' || game.actualDeliveryDate ? null : deliveryWindow(game.eta);
+  }
+
+  function compareRemainingTime(a, b, today, direction = 1) {
+    if (!a || !b) return Number(!a) - Number(!b);
+    const aPast = a.end <= today;
+    const bPast = b.end <= today;
+    if (aPast !== bPast) return Number(aPast) - Number(bPast);
+    if (aPast) return b.end - a.end;
+    return direction * (Math.max(a.start, today) - Math.max(b.start, today)) || a.end - b.end;
+  }
+
   function upcomingOrders(orders, now = new Date()) {
     const today = +localDay(now);
     return orders
-      .filter(game => game.status !== 'delivered' && !game.actualDeliveryDate)
-      .map(game => ({ game, window: deliveryWindow(game.eta) }))
+      .map(game => ({ game, window: orderDeliveryWindow(game) }))
       .filter(({ window }) => window && window.end > today)
-      .sort((a, b) => Math.max(a.window.start, today) - Math.max(b.window.start, today) ||
-        a.window.end - b.window.end)
+      .sort((a, b) => compareRemainingTime(a.window, b.window, today))
       .slice(0, 5)
       .map(({ game }) => game);
   }
@@ -220,7 +231,8 @@
     document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));
     document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active',a.dataset.page===page));
     if (page === 'home') renderUpcoming();
-    if (page === 'orders') refreshDeliveryCountdowns();
+    const catalog = catalogViews.find(view => view.page === page);
+    if (catalog) renderCatalog(catalog);
     window.scrollTo(0,0);
   }
   function navigate(page) {
@@ -247,7 +259,8 @@
     const cssClass = order && Object.hasOwn(statusLabels, game.status) ? game.status : '';
     const cover = webUrl(game.cover);
     const countdown = deliveryCountdownMarkup(game);
-    const subtitle = order ? esc(formatDeliveryDate(game.eta) || '') : 'В списке желаний';
+    const release = formatDeliveryDate(game.releaseDate);
+    const subtitle = order ? esc(formatDeliveryDate(game.eta) || '') : release ? 'Релиз ' + esc(release) : 'В списке желаний';
     return `<article class="game-card" data-id="${esc(game.id)}">
       <div class="cover">${cover ? `<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">` : '✦'}</div>
       <div class="game-info"><h3>${esc(game.name)}</h3>
@@ -266,8 +279,10 @@
   }
 
   const catalogViews = [
-    { type: 'order', search: 'orderSearch', tags: 'orderPublishers', list: 'ordersList', empty: 'ordersEmpty', noMatches: 'ordersNoMatches' },
-    { type: 'wishlist', search: 'wishSearch', tags: 'wishlistPublishers', list: 'wishlistList', empty: 'wishlistEmpty', noMatches: 'wishlistNoMatches' }
+    { page: 'orders', type: 'order', search: 'orderSearch', sort: 'orderSort', tags: 'orderPublishers', list: 'ordersList',
+      empty: 'ordersEmpty', noMatches: 'ordersNoMatches', windowOf: orderDeliveryWindow },
+    { page: 'wishlist', type: 'wishlist', search: 'wishSearch', sort: 'wishSort', tags: 'wishlistPublishers', list: 'wishlistList',
+      empty: 'wishlistEmpty', noMatches: 'wishlistNoMatches', windowOf: game => deliveryWindow(game.releaseDate) }
   ];
   const publisherSelections = new Map(catalogViews.map(view => [view.type, new Set()]));
   const publisherOrder = new Intl.Collator('ru');
@@ -312,13 +327,19 @@
     const filtered = records.filter(game =>
       (!selected.size || selected.has(publisherName(game).toLowerCase())) &&
       (!query || `${game.name} ${game.platform || ''} ${game.notes || ''}`.toLowerCase().includes(query)));
-    renderList(view.list, filtered);
+    const today = +localDay(new Date());
+    const direction = $(view.sort).value === 'farthest' ? -1 : 1;
+    const sorted = filtered.map(game => ({ game, window: view.windowOf(game) }))
+      .sort((a, b) => compareRemainingTime(a.window, b.window, today, direction))
+      .map(({ game }) => game);
+    renderList(view.list, sorted);
     $(view.empty).classList.toggle('show', records.length === 0);
     $(view.noMatches).hidden = !records.length || filtered.length > 0;
   }
 
   for (const view of catalogViews) {
     $(view.search).addEventListener('input', () => renderCatalog(view));
+    $(view.sort).addEventListener('change', () => renderCatalog(view));
     $(view.tags).addEventListener('click', event => {
       const button = event.target.closest('button[data-publisher]');
       if (!button) return;
@@ -496,7 +517,7 @@
   }
   $('closeDialog').addEventListener('click',()=>$('detailDialog').close());
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
-  $('exportBtn').addEventListener('click',exportJson);$('backupBtn').addEventListener('click',exportJson);
+  $('exportBtn').addEventListener('click',exportJson);
   $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){catalogGeneration++;const ids=new Set();games=normalizeDeliveryDates(incoming).map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
   function cloudResponseMessage(status, body, data) {
     if (typeof data?.error === 'string') return data.error;
