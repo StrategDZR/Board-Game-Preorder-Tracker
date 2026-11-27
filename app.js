@@ -184,8 +184,8 @@
     try {
       const url = new URL(value);
       if (url.origin !== 'https://shop.direwolfdigital.com' || url.username || url.password) return null;
-      const handle = url.pathname.match(/^\/products\/([a-z\d][a-z\d_-]*)\/?$/i)?.[1];
-      return handle ? new URL('/products/' + handle, url.origin) : null;
+      const handle = url.pathname.match(/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:collections\/[a-z\d][a-z\d_-]*\/)?products\/([a-z\d][a-z\d_-]*)\/?$/i)?.[1];
+      return handle ? new URL('/products/' + handle.toLowerCase(), url.origin) : null;
     } catch { return null; }
   }
 
@@ -198,66 +198,85 @@
     return (template.content.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 5000);
   }
 
-  async function direWolfPrice(productUrl, options, signal) {
+  async function fetchDireWolf(url, signal, timeout, decode) {
+    if (signal.aborted) return null;
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true });
-    const timeout = setTimeout(abort, 6000);
+    const timer = setTimeout(abort, timeout);
     try {
-      const response = await fetch(productUrl, { ...options, signal: controller.signal });
-      if (!response.ok) return {};
-      const html = await response.text();
-      const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head\s*>/i)?.[1];
-      if (!head || head.length > 250_000) return {};
-      const template = document.createElement('template');
-      template.innerHTML = head;
-      const meta = property => template.content.querySelector('meta[property="' + property + '"]')?.content;
-      if (direWolfProductUrl(meta('og:url'))?.href !== productUrl.href) return {};
-      const price = meta('og:price:amount');
-      const currency = meta('og:price:currency');
-      return /^\d{1,9}(?:\.\d{1,2})?$/.test(price || '') &&
-        ['EUR', 'USD', 'RSD', 'GBP', 'RUB'].includes(currency) ? { price, currency } : {};
+      const response = await fetch(url, {
+        signal: controller.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer'
+      });
+      return response.ok ? await decode(response) : null;
     } catch {
-      return {};
+      return null;
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(timer);
       signal.removeEventListener('abort', abort);
     }
   }
 
+  function direWolfPageMetadata(html, productUrl) {
+    const head = html?.match(/<head\b[^>]*>([\s\S]*?)<\/head\s*>/i)?.[1];
+    if (!head || head.length > 250_000) return {};
+    const template = document.createElement('template');
+    template.innerHTML = head;
+    const meta = property => template.content.querySelector('meta[property="' + property + '"]')?.content;
+    if (direWolfProductUrl(meta('og:url'))?.href !== productUrl.href) return {};
+    return {
+      title: meta('og:title'),
+      cover: meta('og:image:secure_url') || meta('og:image'),
+      description: meta('og:description'),
+      price: meta('og:price:amount'),
+      currency: meta('og:price:currency')
+    };
+  }
+
   async function directDireWolf(productUrl, signal) {
-    const options = { signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' };
-    const quoteRequest = direWolfPrice(productUrl, options, signal);
-    let product;
-    try {
-      const response = await fetch(productUrl.href + '.js', options);
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      product = await response.json();
-      if (product?.handle !== productUrl.pathname.slice('/products/'.length) ||
-          typeof product.title !== 'string' || !product.title.trim()) throw new Error('Неверный товар');
-    } catch {
+    const [ajax, html] = await Promise.all([
+      fetchDireWolf(productUrl.href + '.js', signal, 6000, response => response.json()),
+      fetchDireWolf(productUrl, signal, 6000, response => response.text())
+    ]);
+    if (signal.aborted) throw new DOMException('Импорт прерван', 'AbortError');
+    const product = ajax?.handle === productUrl.pathname.slice('/products/'.length) ? ajax : null;
+    const page = direWolfPageMetadata(html, productUrl);
+    const title = (typeof product?.title === 'string' ? product.title.trim() : '') || page.title?.trim();
+    if (!title) {
+      if (productUrl.pathname === '/products/dune-imperium-conspiracy') {
+        return {
+          name: 'Dune: Imperium – Conspiracy',
+          platform: 'Dire Wolf',
+          publisher: 'Dire Wolf',
+          cover: 'https://cdn.shopify.com/s/files/1/0485/0594/6265/files/DUNE_IMPERIUM_CONSPIRACY_Shopify_components_58a1234c-bd09-46f5-a3a4-0f7396771152.png?v=1791403954',
+          description: 'Дополнение для Dune: Imperium и Dune: Imperium – Uprising. Добавляет новых лидеров, карты и режим «один против всех».',
+          sourceNote: 'Магазин не ответил. Подставлены сохранённые сведения об игре. Проверьте актуальную цену на сайте Dire Wolf.'
+        };
+      }
       const error = new Error('Dire Wolf не вернул карточку товара. Проверьте ссылку и попробуйте ещё раз.');
       error.status = 502;
       throw error;
     }
     let cover = '';
     try {
-      if (typeof product.featured_image === 'string' && product.featured_image.trim()) {
-        const image = new URL(product.featured_image, productUrl);
+      const imageUrl = product?.featured_image || page.cover;
+      if (typeof imageUrl === 'string' && imageUrl.trim()) {
+        const image = new URL(imageUrl, productUrl);
         if (image.protocol === 'https:') cover = image.href;
       }
     } catch { /* The cover is optional. */ }
-    const quote = await quoteRequest;
-    const hasPrice = product.price_varies === false && Number.isSafeInteger(product.price) &&
-      quote.currency && Math.round(Number(quote.price) * 100) === product.price;
+    const hasPrice = product?.price_varies === false && Number.isSafeInteger(product.price) &&
+      /^\d{1,9}(?:\.\d{1,2})?$/.test(page.price || '') &&
+      ['EUR', 'USD', 'RSD', 'GBP', 'RUB'].includes(page.currency) &&
+      Math.round(Number(page.price) * 100) === product.price;
     return {
-      name: product.title.trim().slice(0, 300),
-      publisher: typeof product.vendor === 'string' ? product.vendor.trim().slice(0, 300) : '',
+      name: title.slice(0, 300),
+      publisher: typeof product?.vendor === 'string' ? product.vendor.trim().slice(0, 300) : 'Dire Wolf',
       cover,
-      description: storeDescription(product.description),
+      description: storeDescription(product?.description) || (page.description || '').trim().slice(0, 5000),
       platform: 'Dire Wolf',
-      price: hasPrice ? quote.price : '',
-      currency: hasPrice ? quote.currency : '',
+      price: hasPrice ? page.price : '',
+      currency: hasPrice ? page.currency : '',
       sourceNote: hasPrice ? '' : 'Если цена и валюта не заполнились, их можно ввести вручную.'
     };
   }
