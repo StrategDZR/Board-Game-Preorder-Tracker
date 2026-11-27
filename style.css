@@ -6,8 +6,18 @@
 #authGate h1 { margin-bottom: 12px; }
 #formNote { margin: 8px 0 16px; }
 .form-grid label { min-width: 0; }
-.order-fields { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.form-card input[type="date"] { min-width: 0; max-width: 100%; min-height: 44px; }
+.order-fields { border: 0; padding: 0; margin: 0; width: 100%; min-inline-size: 0; }
+.form-card input[type="date"] { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; }
+@supports (-webkit-touch-callout: none) {
+  .form-card input[type="date"] { -webkit-appearance: none; appearance: none; }
+  .form-card input[type="date"]::-webkit-date-and-time-value { min-width: 0; text-align: left; }
+}
+.order-import { margin-top: 12px; }
+.order-import summary { cursor: pointer; font-size: 13px; }
+.order-import[open] summary { margin-bottom: 14px; }
+#orderItemField { margin-top: 14px; }
+.delivery-countdown { color: var(--gold); }
+.game-info .delivery-summary { white-space: normal; }
 .form-card label[hidden] { display: none; }
 .danger-button { background: var(--danger); color: #1c1b15; }
 button:disabled { opacity: .55; cursor: default; }

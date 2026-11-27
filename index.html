@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111311">
   <title>My Board Games Preorders</title>
-  <link rel="stylesheet" href="./style.css?v=0.4.9">
+  <link rel="stylesheet" href="./style.css?v=0.4.12">
 </head>
 <body>
   <main class="app-shell" id="authGate">
@@ -62,12 +62,19 @@
           <input type="hidden" id="gameId">
           <label>Ссылка на кампанию, товар или заказ<input id="url" type="url" placeholder="https://www.kickstarter.com/…" inputmode="url"></label>
           <button type="button" class="secondary-button" id="fetchGame">Получить данные</button>
-          <details>
+          <details class="order-import">
+            <summary>Импорт заказа из текста</summary>
+            <label>Товары из заказа «Лавки Игр»
+              <textarea id="orderText" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Вставьте скопированные названия товаров и цены"></textarea>
+            </label>
+            <button type="button" class="secondary-button" id="parseOrderText">Найти товары</button>
+          </details>
+          <details class="order-import">
             <summary>Импорт закрытого заказа из HTML</summary>
             <p class="hint">Войдите в магазин, откройте заказ и сохраните страницу как HTML. Вставьте ссылку на заказ выше и выберите файл. Файл обрабатывается в этом браузере.</p>
             <label>HTML-файл заказа<input id="orderHtml" type="file" accept=".html,.htm,text/html"></label>
-            <label id="orderItemField" hidden>Товар из заказа<select id="orderItem"></select></label>
           </details>
+          <label id="orderItemField" hidden>Товар из заказа<select id="orderItem"></select></label>
           <p class="hint" id="formNote" role="status"></p>
           <label>Название игры<input id="name" required placeholder="Например, Dice Throne: Nexus"></label>
           <label>Обложка (URL)<input id="cover" type="url" inputmode="url"></label>
@@ -136,6 +143,6 @@
     </section>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.11"></script>
+  <script src="./app.js?v=0.4.12"></script>
 </body>
 </html>

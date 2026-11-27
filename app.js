@@ -101,6 +101,52 @@
     });
   }
   const statusLabels = {campaign:'Кампания / предзаказ',production:'Производство',shipping:'Отправлено',delivered:'Доставлено',paused:'Приостановлено'};
+  const deliveryDays = new Intl.NumberFormat('ru', { style: 'unit', unit: 'day', unitDisplay: 'long' });
+  const deliveryMonths = new Intl.NumberFormat('ru', { style: 'unit', unit: 'month', unitDisplay: 'long' });
+  const dayMs = 86_400_000;
+
+  function calendarMonthOffset(date, months) {
+    const offset = new Date(date);
+    offset.setUTCDate(1);
+    offset.setUTCMonth(offset.getUTCMonth() + months + 1, 0);
+    offset.setUTCDate(Math.min(date.getUTCDate(), offset.getUTCDate()));
+    return offset;
+  }
+
+  function deliveryCountdown(eta, now = new Date()) {
+    const today = new Date(now);
+    today.setUTCFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+    today.setUTCHours(0, 0, 0, 0);
+    const delivery = new Date(eta + 'T00:00:00Z');
+    const days = (delivery - today) / dayMs;
+    if (!Number.isFinite(days)) return '';
+    if (days === 0) return 'Ожидается сегодня';
+    if (days < 0) return 'Срок прошёл ' + deliveryDays.format(-days) + ' назад';
+
+    let months = (delivery.getUTCFullYear() - today.getUTCFullYear()) * 12 +
+      delivery.getUTCMonth() - today.getUTCMonth();
+    if (calendarMonthOffset(today, months) > delivery) months--;
+    if (!months) return 'До доставки меньше месяца (' + deliveryDays.format(days) + ')';
+    const remainder = (delivery - calendarMonthOffset(today, months)) / dayMs;
+    return 'До доставки ' + deliveryMonths.format(months) +
+      (remainder ? ' ' + deliveryDays.format(remainder) : '');
+  }
+
+  function deliveryCountdownMarkup(game) {
+    if (game.type !== 'order' || !game.eta || game.status === 'delivered' || game.actualDeliveryDate) return '';
+    const text = deliveryCountdown(game.eta);
+    return text ? `<span class="delivery-countdown" data-delivery-date="${esc(game.eta)}">${esc(text)}</span>` : '';
+  }
+
+  function refreshDeliveryCountdowns() {
+    const now = new Date();
+    for (const countdown of document.querySelectorAll('[data-delivery-date]')) {
+      countdown.textContent = deliveryCountdown(countdown.dataset.deliveryDate, now);
+    }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshDeliveryCountdowns();
+  });
   function save(){
     change++;
     state = { ...state, dirty: true };
@@ -120,6 +166,7 @@
     if (page === 'add' && (newType || !editingId)) resetForm(newType);
     document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));
     document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active',a.dataset.page===page));
+    if (page === 'home' || page === 'orders') refreshDeliveryCountdowns();
     window.scrollTo(0,0);
   }
   function navigate(page) {
@@ -140,7 +187,22 @@
     $('releaseDate').disabled = isOrder;
   }
   $('type').addEventListener('change', showTypeFields);
-  function card(g){const status=g.type==='wishlist'?'Wishlist':(statusLabels[g.status]||'Предзаказ');const cls=g.type==='order'&&Object.hasOwn(statusLabels,g.status)?g.status:'';const cover=webUrl(g.cover);return `<article class="game-card" data-id="${esc(g.id)}"><div class="cover">${cover?`<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">`:'✦'}</div><div class="game-info"><h3>${esc(g.name)}</h3><p>${esc(g.platform||'Площадка не указана')} · ${esc(g.type==='wishlist'?'В списке желаний':g.eta||'')}</p><span class="status ${cls}">${esc(status)}</span></div><span class="arrow">›</span></article>`}
+  function card(game) {
+    const order = game.type === 'order';
+    const status = order ? statusLabels[game.status] || 'Предзаказ' : 'Wishlist';
+    const cssClass = order && Object.hasOwn(statusLabels, game.status) ? game.status : '';
+    const cover = webUrl(game.cover);
+    const countdown = deliveryCountdownMarkup(game);
+    const subtitle = order ? esc(game.eta || '') : 'В списке желаний';
+    return `<article class="game-card" data-id="${esc(game.id)}">
+      <div class="cover">${cover ? `<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">` : '✦'}</div>
+      <div class="game-info"><h3>${esc(game.name)}</h3>
+        <p>${esc(game.platform || 'Площадка не указана')}${subtitle ? ' · ' + subtitle : ''}</p>
+        ${countdown ? `<p class="delivery-summary">${countdown}</p>` : ''}
+        <span class="status ${cssClass}">${esc(status)}</span>
+      </div><span class="arrow">›</span>
+    </article>`;
+  }
   function renderList(containerId,emptyId,items){$(containerId).innerHTML=items.map(card).join('');$(emptyId).classList.toggle('show',items.length===0);$(containerId).querySelectorAll('.game-card').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)))}
   function render(){const orders=games.filter(g=>g.type==='order'),wish=games.filter(g=>g.type==='wishlist');$('stat-orders').textContent=orders.filter(g=>g.status!=='delivered').length;$('stat-shipping').textContent=orders.filter(g=>g.status==='shipping').length;renderList('ordersList','ordersEmpty',filter(orders,$('orderSearch').value));renderList('wishlistList','wishlistEmpty',filter(wish,$('wishSearch').value));const recent=[...orders].sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,3);renderList('recentList','homeEmpty',recent);$('homeEmpty').classList.toggle('show',orders.length===0)}
   function filter(items,q){q=(q||'').trim().toLowerCase();return items.filter(g=>!q||`${g.name} ${g.platform} ${g.notes}`.toLowerCase().includes(q))}
@@ -205,7 +267,9 @@
     const d = $('detailContent');
     const url = webUrl(g.url);
     const order = g.type === 'order';
+    const countdown = deliveryCountdownMarkup(g);
     d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ['Дата релиза', g.releaseDate], ...(order ? [['Ожидаемая доставка', g.eta], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions">${order?'':'<button type="button" class="primary-button" id="moveToOrders">Перенести в предзаказы</button>'}<button type="button" class="${order?'primary':'secondary'}-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;
+    if (countdown) d.querySelector('h2').insertAdjacentHTML('afterend', `<p>${countdown}</p>`);
     $('detailDialog').showModal();
     $('editGame').onclick = () => {
       $('detailDialog').close();
@@ -412,7 +476,7 @@
         return api('/api/import?url=' + encodeURIComponent(campaignUrl || publicUrl.origin + path), { signal });
       }
     }
-    throw Object.assign(new Error('Для закрытого заказа сохраните страницу из личного кабинета и выберите её в разделе «Импорт закрытого заказа из HTML». Для импорта по ссылке укажите публичную кампанию или товар поддерживаемого магазина.'), { status: 400 });
+    throw Object.assign(new Error('Для закрытого заказа используйте импорт из текста или HTML. Для импорта по ссылке укажите публичную кампанию или товар поддерживаемого магазина.'), { status: 400 });
   }
 
   function orderProductRows(html, source) {
@@ -479,12 +543,127 @@
     $('formNote').textContent = 'Данные товара подставлены в пустые поля. Проверьте форму и нажмите «Сохранить игру».';
   }
 
+  function lavkaOrderTextItems(text) {
+    const items = [];
+    const money = /((?:\d{1,3}(?: \d{3})+|\d{1,9})(?:[.,]\d{1,2})?) *(?:₽|руб(?:лей|ля|\.)?|RUB|р\.)(?![а-яa-z])/giu;
+    const quantity = /(?:^|\s)(?:[xх×] *(\d+)|(\d+) *шт\.?)(?=\s|$)/iu;
+    const itemHeader = /^(?:товары?|наименование(?: товара)?|название(?: товара)?|позиция)$/i;
+    const priceHeader = /^цена(?: за (?:шт\.?|ед\.?|единицу))?(?:[, ]+(?:₽|руб\.?))?$/i;
+    const metadata = /^(?:заказ|итого|всего|к оплате|доставка|стоимость доставки|скидка|сумма|оплата|покупатель|получатель|телефон|контакт(?:ы)?|адрес|электронная почта|e-?mail|комментарий|статус|номер|дата|состав заказа|количество|цена|промокод|артикул|оплачено)(?=[\s:№#]|$)/iu;
+    let columns = null;
+    let entry = null;
+
+    const cleanName = value => value.replace(/^[•‣▪]\s*/, '').replace(/\s*[:;|—–-]+\s*$/, '').trim();
+    const isProductName = name => /\p{L}/u.test(name) && !metadata.test(name) && !itemHeader.test(name) &&
+      !/https?:\/\/|@/.test(name);
+    const normalizePrice = value => value.replace(/ /g, '').replace(',', '.');
+    const add = (name, price = '') => items.push({
+      name: name.slice(0, 300), platform: 'Lavka Games', price, currency: price ? 'RUB' : ''
+    });
+    const finish = () => {
+      if (entry?.prices.length) {
+        const [first, second] = entry.prices;
+        const unit = entry.explicitPrice || (!entry.count || entry.count === 1 ||
+          (second && Number(first) * entry.count === Number(second)) ? first : '');
+        add(entry.name, unit);
+      }
+      entry = null;
+    };
+
+    for (const raw of text.replace(/[\u00a0\u202f]/g, ' ').replace(/\r\n?/g, '\n').split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      const cells = line.split(/\t+| {2,}/).map(cell => cell.trim());
+      const nameColumn = cells.findIndex(cell => itemHeader.test(cell));
+      const priceColumn = cells.findIndex(cell => priceHeader.test(cell));
+      if (nameColumn >= 0 && priceColumn >= 0) {
+        finish();
+        columns = { name: nameColumn, price: priceColumn };
+        continue;
+      }
+      if (/^(?:итого|всего|к оплате|оплата|адрес доставки|получатель)(?=[\s:]|$)/i.test(line)) {
+        finish();
+        if (items.length) break;
+      }
+      if (columns && cells.length > Math.max(columns.name, columns.price)) {
+        const name = cleanName(cells[columns.name]);
+        const amount = cells[columns.price].match(/^(\d[\d ]*(?:[.,]\d{1,2})?)\s*(?:₽|руб\.?|RUB)?$/i);
+        if (isProductName(name) && amount) {
+          finish();
+          add(name, normalizePrice(amount[1]));
+          continue;
+        }
+      }
+      const prices = Array.from(line.matchAll(money));
+      const count = line.match(quantity);
+      const labeledCount = line.match(/^количество\s*[:—-]?\s*(\d{1,3})(?:\s*шт\.?)?$/i);
+      if (labeledCount && entry) {
+        entry.count = Number(labeledCount[1]);
+        continue;
+      }
+      const prefix = prices.length ? line.slice(0, prices[0].index) : line;
+      const name = cleanName(prefix.replace(quantity, ''));
+      if (isProductName(name)) {
+        finish();
+        entry = { name, prices: [], count: 0, explicitPrice: '' };
+      } else if (metadata.test(line) && !priceHeader.test(cleanName(prefix))) {
+        finish();
+        continue;
+      }
+      if (!entry) continue;
+      if (count) entry.count = Number(count[1] || count[2]);
+      else if (/^\d{1,3}$/.test(line)) entry.count = Number(line);
+      const amounts = prices.map(match => normalizePrice(match[1]));
+      if (priceHeader.test(cleanName(prefix)) && amounts.length) entry.explicitPrice = amounts[0];
+      entry.prices.push(...amounts);
+    }
+    finish();
+    return items;
+  }
+
+  function previewOrderItems(items) {
+    orderItems = items;
+    $('type').value = 'order';
+    showTypeFields();
+    if (items.length === 1) {
+      showImportedOrderItem(0);
+      return;
+    }
+    const select = $('orderItem');
+    select.add(new Option('Выберите товар', ''));
+    select.options[0].disabled = true;
+    items.forEach((item, index) => select.add(new Option(item.name, String(index))));
+    $('orderItemField').hidden = false;
+    $('formNote').textContent = 'Выберите товар. Каждая карточка хранит одну игру.';
+  }
+
   $('orderItem').addEventListener('change', () => showImportedOrderItem($('orderItem').value));
+  $('parseOrderText').addEventListener('click', () => {
+    if (!signedIn) return;
+    const input = $('orderText');
+    const note = $('formNote');
+    if (input.value.length > 40_000) {
+      note.textContent = 'Скопируйте только список товаров с ценами.';
+      return;
+    }
+    const items = lavkaOrderTextItems(input.value);
+    if (!items.length) {
+      note.textContent = 'Товары не найдены. Вставьте названия и цены в рублях, например «Название игры — 2 450 ₽».';
+      return;
+    }
+    const previousFields = importedOrderFields;
+    cancelImport();
+    importedOrderFields = previousFields;
+    input.value = '';
+    previewOrderItems(items);
+  });
   $('orderHtml').addEventListener('change', async () => {
     const file = $('orderHtml').files[0];
     $('orderHtml').value = '';
     if (!file || !signedIn) return;
+    const previousFields = importedOrderFields;
     cancelImport();
+    importedOrderFields = previousFields;
     const version = formVersion;
     const note = $('formNote');
     const value = webUrl($('url').value.trim());
@@ -502,26 +681,15 @@
       if (version !== formVersion) return;
       const head = new TextDecoder().decode(bytes.slice(0, 4096));
       const encoding = /charset\s*=\s*["']?(?:windows-1251|cp1251)/i.test(head) ? 'windows-1251' : 'utf-8';
-      orderItems = orderProductRows(new TextDecoder(encoding).decode(bytes), source);
-      if (!orderItems.length) {
+      const items = orderProductRows(new TextDecoder(encoding).decode(bytes), source);
+      if (!items.length) {
         note.textContent = 'В HTML не найдены товары заказа. Проверьте, что сохранили открытую страницу заказа после входа.';
         return;
       }
       source.search = '';
       source.hash = '';
       $('url').value = source.href;
-      $('type').value = 'order';
-      showTypeFields();
-      if (orderItems.length === 1) {
-        showImportedOrderItem(0);
-      } else {
-        const select = $('orderItem');
-        select.add(new Option('Выберите товар', ''));
-        select.options[0].disabled = true;
-        orderItems.forEach((item, index) => select.add(new Option(item.name, String(index))));
-        $('orderItemField').hidden = false;
-        note.textContent = 'Выберите товар. Каждая карточка хранит одну игру.';
-      }
+      previewOrderItems(items);
     } catch {
       if (version === formVersion) note.textContent = 'Не удалось прочитать HTML-файл заказа.';
     }
