@@ -78,6 +78,15 @@
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
   $('exportBtn').addEventListener('click',exportJson);$('backupBtn').addEventListener('click',exportJson);
   $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){const ids=new Set();games=incoming.map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
+  function cloudResponseMessage(status, body, data) {
+    if (typeof data?.error === 'string') return data.error;
+    if (/\b(?:error\s+(?:code\s*)?:?\s*1027|daily request limit)\b/i.test(body)) {
+      return 'Достигнут дневной лимит бесплатного тарифа Cloudflare Workers. Повторите после 00:00 UTC.';
+    }
+    if (status === 429) return 'Cloudflare временно ограничил запросы. Попробуйте позже.';
+    return 'Cloudflare вернул ошибку. Попробуйте позже.';
+  }
+
   async function api(path, options = {}) {
     const { endpoint, token } = cloud;
     const response = await fetch(endpoint + path, {
@@ -87,8 +96,11 @@
       headers: { Authorization: 'Bearer ' + token, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
       body: options.body
     });
-    const data = await response.json();
-    if (!response.ok) throw Object.assign(new Error(data.error || 'Ошибка Worker.'), { status: response.status });
+    const body = await response.text();
+    let data;
+    try { data = JSON.parse(body); } catch { /* Cloudflare can return an HTML error page. */ }
+    if (!response.ok) throw Object.assign(new Error(cloudResponseMessage(response.status, body, data)), { status: response.status });
+    if (!data) throw new Error('Worker вернул некорректный ответ.');
     return data;
   }
 
@@ -118,7 +130,8 @@
       }
       note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.';
     } catch (error) {
-      if (version === formVersion) note.textContent = error.status ? error.message : 'Worker не ответил. Попробуйте ещё раз.';
+      if (version === formVersion) note.textContent = error.status ? error.message
+        : 'Не удалось связаться с Cloudflare. Проверьте подключение и повторите позже. Если исчерпана дневная квота, она обновится в 00:00 UTC.';
     } finally {
       clearTimeout(timeout);
       if (version === formVersion) {
@@ -171,7 +184,8 @@
       if (error.status === 409) setState({ endpoint, dirty: true });
       cloudStatus(error.status === 409
         ? 'Каталог изменился на другом устройстве. Выберите, какую версию оставить.'
-        : error.status ? error.message : 'Синхронизация не завершилась. Локальные записи доступны. Повторите подключение.');
+        : error.status ? error.message + ' Локальные записи доступны.'
+          : 'Cloudflare недоступен. Локальные записи доступны. Повторите подключение позже. Если исчерпана дневная квота, она обновится в 00:00 UTC.');
     } finally {
       syncing = false;
       cloudButtons();
