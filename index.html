@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111311">
   <title>My Board Games Preorders</title>
-  <link rel="stylesheet" href="./style.css?v=0.4.16">
+  <link rel="stylesheet" href="./style.css?v=0.4.17">
 </head>
 <body>
   <main class="app-shell" id="authGate">
@@ -29,30 +29,33 @@
     <main>
       <section class="page active" id="page-home">
         <div class="eyebrow">ТВОЯ КОЛЛЕКЦИЯ</div>
-        <h1>Игры, которые<br><em>уже на пути.</em></h1>
-        <p class="intro">Все предзаказы и игровые планы — в одном месте.</p>
+        <h1>Игры, которые <em>уже на пути.</em></h1>
         <div class="stats">
-          <article class="stat-card"><span>ПРЕДЗАКАЗЫ</span><strong id="stat-orders">0</strong><small>активных проектов</small></article>
-          <article class="stat-card"><span>В ПУТИ</span><strong id="stat-shipping">0</strong><small>ожидают доставки</small></article>
+          <article class="stat-card"><span>АКТИВНЫЕ ПРЕДЗАКАЗЫ</span><strong id="stat-orders">0</strong></article>
+          <article class="stat-card"><span>В ПУТИ</span><strong id="stat-shipping">0</strong></article>
         </div>
-        <div class="section-heading"><h2>Последние обновления</h2><button class="text-button" data-go="orders">Все предзаказы →</button></div>
-        <div id="recentList" class="card-list"></div>
-        <div class="empty-state" id="homeEmpty"><div class="empty-icon">♧</div><b>Пока здесь тихо</b><p>Добавь первый предзаказ — и он появится на главной.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
+        <div class="section-heading"><h2>Ближайшие доставки</h2><button class="text-button" data-go="orders">Все предзаказы →</button></div>
+        <div id="upcomingList" class="card-list"></div>
+        <div class="empty-state" id="homeEmpty"><b>Ближайших доставок пока нет</b><p>Здесь появятся предзаказы с ожидаемым сроком доставки.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
       </section>
 
       <section class="page" id="page-orders">
         <div class="eyebrow">ТВОИ ПРОЕКТЫ</div><h1>Предзаказы</h1>
         <div class="toolbar"><input id="orderSearch" class="search" placeholder="Найти игру…" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
+        <div id="orderPublishers" class="publisher-filters" role="group" aria-label="Фильтр по издателям" hidden></div>
         <button type="button" class="secondary-button" id="checkUpdates">Проверить сейчас</button>
         <p id="updatesStatus" class="form-note" role="status"></p>
         <div id="ordersList" class="card-list"></div>
+        <p class="filter-empty" id="ordersNoMatches" role="status" hidden>По выбранным фильтрам ничего не найдено.</p>
         <div id="ordersEmpty" class="empty-state"><div class="empty-icon">♧</div><b>Предзаказов пока нет</b><p>Добавь игру по ссылке или вручную.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
       </section>
 
       <section class="page" id="page-wishlist">
         <div class="eyebrow">КОГДА-НИБУДЬ В КОЛЛЕКЦИИ</div><h1>Wishlist</h1>
         <div class="toolbar"><input id="wishSearch" class="search" placeholder="поиск по вишлисту" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
+        <div id="wishlistPublishers" class="publisher-filters" role="group" aria-label="Фильтр по издателям" hidden></div>
         <div id="wishlistList" class="card-list"></div>
+        <p class="filter-empty" id="wishlistNoMatches" role="status" hidden>По выбранным фильтрам ничего не найдено.</p>
         <div id="wishlistEmpty" class="empty-state"><div class="empty-icon">♡</div><b>Список желаний пуст</b><p>Сохраняй игры, которые хочешь приобрести.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
       </section>
 
@@ -145,6 +148,6 @@
     </section>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.16"></script>
+  <script src="./app.js?v=0.4.17"></script>
 </body>
 </html>

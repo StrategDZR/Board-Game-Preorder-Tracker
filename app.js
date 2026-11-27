@@ -108,6 +108,7 @@
   const isDeliveryMonth = value => /^(?!0000)\d{4}-(?:0[1-9]|1[0-2])$/.test(value);
   const deliverySeason = value => /^(20\d{2})-(winter|spring|summer|autumn)$/.exec(value);
   const seasonLabels = { winter: 'зима', spring: 'весна', summer: 'лето', autumn: 'осень' };
+  const seasonMonths = { winter: '12', spring: '03', summer: '06', autumn: '09' };
 
   function deliveryDate(value) {
     if (typeof value !== 'string' || !/^(?!0000)\d{4}-\d{2}(?:-\d{2})?$/.test(value)) return null;
@@ -131,12 +132,38 @@
     return offset;
   }
 
-  function deliveryCountdown(eta, now = new Date()) {
-    const delivery = deliveryDate(eta);
-    if (!delivery) return '';
+  function localDay(now) {
     const today = new Date(now);
     today.setUTCFullYear(now.getFullYear(), now.getMonth(), now.getDate());
     today.setUTCHours(0, 0, 0, 0);
+    return today;
+  }
+
+  function deliveryWindow(eta) {
+    const season = deliverySeason(eta);
+    const start = deliveryDate(season ? `${season[1]}-${seasonMonths[season[2]]}` : eta);
+    if (!start) return null;
+    const months = season ? 3 : Number(isDeliveryMonth(eta));
+    const end = months ? +calendarMonthOffset(start, months) : +start + dayMs;
+    return { start: +start, end };
+  }
+
+  function upcomingOrders(orders, now = new Date()) {
+    const today = +localDay(now);
+    return orders
+      .filter(game => game.status !== 'delivered' && !game.actualDeliveryDate)
+      .map(game => ({ game, window: deliveryWindow(game.eta) }))
+      .filter(({ window }) => window && window.end > today)
+      .sort((a, b) => Math.max(a.window.start, today) - Math.max(b.window.start, today) ||
+        a.window.end - b.window.end)
+      .slice(0, 5)
+      .map(({ game }) => game);
+  }
+
+  function deliveryCountdown(eta, now = new Date()) {
+    const delivery = deliveryDate(eta);
+    if (!delivery) return '';
+    const today = localDay(now);
     let months = (delivery.getUTCFullYear() - today.getUTCFullYear()) * 12 +
       delivery.getUTCMonth() - today.getUTCMonth();
     if (isDeliveryMonth(eta)) {
@@ -168,7 +195,9 @@
     }
   }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) refreshDeliveryCountdowns();
+    if (document.hidden) return;
+    if ($('page-home').classList.contains('active')) renderUpcoming();
+    refreshDeliveryCountdowns();
   });
   function save(){
     change++;
@@ -189,7 +218,8 @@
     if (page === 'add' && (newType || !editingId)) resetForm(newType);
     document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));
     document.querySelectorAll('.nav-item').forEach(a=>a.classList.toggle('active',a.dataset.page===page));
-    if (page === 'home' || page === 'orders') refreshDeliveryCountdowns();
+    if (page === 'home') renderUpcoming();
+    if (page === 'orders') refreshDeliveryCountdowns();
     window.scrollTo(0,0);
   }
   function navigate(page) {
@@ -226,10 +256,95 @@
       </div><span class="arrow">›</span>
     </article>`;
   }
-  function renderList(containerId,emptyId,items){$(containerId).innerHTML=items.map(card).join('');$(emptyId).classList.toggle('show',items.length===0);$(containerId).querySelectorAll('.game-card').forEach(el=>el.addEventListener('click',()=>showDetail(el.dataset.id)))}
-  function render(){const orders=games.filter(g=>g.type==='order'),wish=games.filter(g=>g.type==='wishlist');$('stat-orders').textContent=orders.filter(g=>g.status!=='delivered').length;$('stat-shipping').textContent=orders.filter(g=>g.status==='shipping').length;renderList('ordersList','ordersEmpty',filter(orders,$('orderSearch').value));renderList('wishlistList','wishlistEmpty',filter(wish,$('wishSearch').value));const recent=[...orders].sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,3);renderList('recentList','homeEmpty',recent);$('homeEmpty').classList.toggle('show',orders.length===0)}
-  function filter(items,q){q=(q||'').trim().toLowerCase();return items.filter(g=>!q||`${g.name} ${g.platform} ${g.notes}`.toLowerCase().includes(q))}
-  $('orderSearch').addEventListener('input',render);$('wishSearch').addEventListener('input',render);
+  function renderList(containerId, items) {
+    const container = $(containerId);
+    container.innerHTML = items.map(card).join('');
+    for (const entry of container.querySelectorAll('.game-card')) {
+      entry.addEventListener('click', () => showDetail(entry.dataset.id));
+    }
+  }
+
+  const catalogViews = [
+    { type: 'order', search: 'orderSearch', tags: 'orderPublishers', list: 'ordersList', empty: 'ordersEmpty', noMatches: 'ordersNoMatches' },
+    { type: 'wishlist', search: 'wishSearch', tags: 'wishlistPublishers', list: 'wishlistList', empty: 'wishlistEmpty', noMatches: 'wishlistNoMatches' }
+  ];
+  const publisherSelections = new Map(catalogViews.map(view => [view.type, new Set()]));
+  const publisherOrder = new Intl.Collator('ru');
+
+  function publisherName(game) {
+    return typeof game.publisher === 'string' ? game.publisher.trim().replace(/\s+/g, ' ').normalize() : '';
+  }
+
+  function renderPublisherTags(view, publishers, selected) {
+    const container = $(view.tags);
+    container.hidden = publishers.size === 0;
+    const tags = [['', 'Все издатели'], ...[...publishers].sort((a, b) => publisherOrder.compare(a[1], b[1]))];
+    const buttons = Array.from(container.children);
+    if (buttons.length !== tags.length || tags.some(([key, label], i) =>
+      buttons[i].dataset.publisher !== key || buttons[i].textContent !== label)) {
+      container.replaceChildren(...tags.map(([key, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'publisher-tag';
+        button.dataset.publisher = key;
+        button.textContent = label;
+        return button;
+      }));
+    }
+    for (const button of container.children) {
+      const key = button.dataset.publisher;
+      button.setAttribute('aria-pressed', String(key ? selected.has(key) : !selected.size));
+    }
+  }
+
+  function renderCatalog(view, records = games.filter(game => game.type === view.type)) {
+    const publishers = new Map();
+    for (const game of records) {
+      const name = publisherName(game);
+      const key = name.toLowerCase();
+      if (name && !publishers.has(key)) publishers.set(key, name);
+    }
+    const selected = publisherSelections.get(view.type);
+    for (const key of selected) if (!publishers.has(key)) selected.delete(key);
+    renderPublisherTags(view, publishers, selected);
+    const query = $(view.search).value.trim().toLowerCase();
+    const filtered = records.filter(game =>
+      (!selected.size || selected.has(publisherName(game).toLowerCase())) &&
+      (!query || `${game.name} ${game.platform || ''} ${game.notes || ''}`.toLowerCase().includes(query)));
+    renderList(view.list, filtered);
+    $(view.empty).classList.toggle('show', records.length === 0);
+    $(view.noMatches).hidden = !records.length || filtered.length > 0;
+  }
+
+  for (const view of catalogViews) {
+    $(view.search).addEventListener('input', () => renderCatalog(view));
+    $(view.tags).addEventListener('click', event => {
+      const button = event.target.closest('button[data-publisher]');
+      if (!button) return;
+      const selected = publisherSelections.get(view.type);
+      const key = button.dataset.publisher;
+      if (!key) selected.clear();
+      else if (selected.has(key)) selected.delete(key);
+      else selected.add(key);
+      renderCatalog(view);
+    });
+  }
+
+  function renderUpcoming(orders = games.filter(game => game.type === 'order')) {
+    const upcoming = upcomingOrders(orders);
+    renderList('upcomingList', upcoming);
+    $('homeEmpty').classList.toggle('show', upcoming.length === 0);
+  }
+
+  function render() {
+    const orders = games.filter(game => game.type === 'order');
+    $('stat-orders').textContent = orders.filter(game => game.status !== 'delivered').length;
+    $('stat-shipping').textContent = orders.filter(game => game.status === 'shipping').length;
+    for (const view of catalogViews) {
+      renderCatalog(view, view.type === 'order' ? orders : games.filter(game => game.type === view.type));
+    }
+    renderUpcoming(orders);
+  }
   function cancelImport() {
     formVersion++;
     importRequest?.abort();
