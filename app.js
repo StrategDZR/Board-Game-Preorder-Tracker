@@ -7,7 +7,10 @@
     'shipping', 'eta', 'notes', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd'];
   const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignStart', 'campaignEnd', 'currency'];
   const cloudKey = 'mbgp_v03_cloud';
+  const workerEndpoint = 'https://board-game-preorder-tracker.strategdzr.workers.dev';
   let cloud = null;
+  let signedIn = false;
+  let loginOpen = false;
   let syncing = false;
   let change = 0;
   let formVersion = 0;
@@ -27,7 +30,7 @@
     change++;
     setState({ ...state, dirty: true });
     writeLocal();
-    if (cloud && state.endpoint === cloud.endpoint && Number.isInteger(state.revision)) sync('auto');
+    if (signedIn && state.endpoint === cloud.endpoint && Number.isInteger(state.revision)) sync('auto');
   }
   function webUrl(value) {
     try {
@@ -106,8 +109,8 @@
 
   $('fetchGame').addEventListener('click', async () => {
     const note = $('formNote');
-    if (!cloud) {
-      note.textContent = 'Подключите Worker в настройках приложения.';
+    if (!signedIn) {
+      note.textContent = 'Для импорта войдите через «Ещё → Личный доступ».';
       return;
     }
     const url = $('url').value.trim();
@@ -128,7 +131,8 @@
       for (const id of importFields) {
         if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') $(id).value = result[id];
       }
-      note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.';
+      note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.' +
+        (typeof result.sourceNote === 'string' ? ' ' + result.sourceNote : '');
     } catch (error) {
       if (version === formVersion) note.textContent = error.status ? error.message
         : 'Не удалось связаться с Cloudflare. Проверьте подключение и повторите позже. Если исчерпана дневная квота, она обновится в 00:00 UTC.';
@@ -141,10 +145,16 @@
     }
   });
 
-  function cloudStatus(message) { $('cloudStatus').textContent = message; }
+  function cloudStatus(message) {
+    $('cloudStatus').textContent = message;
+    $('cloudStatus').hidden = !message;
+  }
   function cloudButtons() {
+    $('showLogin').hidden = signedIn || loginOpen || syncing;
+    $('cloudForm').hidden = signedIn || !loginOpen;
+    $('cloudControls').hidden = !signedIn;
     $('connectCloud').disabled = syncing;
-    $('downloadCloud').disabled = $('uploadCloud').disabled = syncing || !cloud;
+    $('downloadCloud').disabled = $('uploadCloud').disabled = $('logoutCloud').disabled = syncing;
   }
   async function sync(mode) {
     if (!cloud || syncing) return;
@@ -156,6 +166,12 @@
     cloudStatus('Связываемся с D1…');
     try {
       const remote = mode === 'auto' ? null : await api('/api/catalog');
+      if (mode === 'connect') {
+        signedIn = true;
+        loginOpen = false;
+        $('accessToken').value = '';
+        sessionStorage.setItem(cloudKey, JSON.stringify(cloud));
+      }
       const knownEndpoint = state.endpoint === endpoint;
       if (mode === 'download' || (mode === 'connect' &&
           (knownEndpoint && !state.dirty || !knownEndpoint && !games.length))) {
@@ -181,6 +197,12 @@
       }
       cloudStatus('Каталог синхронизирован с D1.');
     } catch (error) {
+      if (error.status === 401) {
+        signedIn = false;
+        loginOpen = true;
+        cloud = null;
+        sessionStorage.removeItem(cloudKey);
+      }
       if (error.status === 409) setState({ endpoint, dirty: true });
       cloudStatus(error.status === 409
         ? 'Каталог изменился на другом устройстве. Выберите, какую версию оставить.'
@@ -195,17 +217,21 @@
 
   $('cloudForm').addEventListener('submit', event => {
     event.preventDefault();
-    const endpoint = new URL($('workerUrl').value);
-    const loopback = ['localhost', '127.0.0.1'].includes(endpoint.hostname);
-    if (!(endpoint.protocol === 'https:' || loopback && endpoint.protocol === 'http:') ||
-        endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
-      cloudStatus('Укажите HTTPS-адрес Worker без пути и параметров.');
-      return;
-    }
-    cloud = { endpoint: endpoint.origin, token: $('accessToken').value };
-    localStorage.setItem('mbgp_v03_endpoint', cloud.endpoint);
-    sessionStorage.setItem(cloudKey, JSON.stringify(cloud));
+    cloud = { endpoint: workerEndpoint, token: $('accessToken').value };
     sync('connect');
+  });
+  $('showLogin').addEventListener('click', () => {
+    loginOpen = true;
+    cloudButtons();
+    $('accessToken').focus();
+  });
+  $('logoutCloud').addEventListener('click', () => {
+    cancelImport();
+    cloud = null;
+    signedIn = false;
+    sessionStorage.removeItem(cloudKey);
+    cloudStatus('');
+    cloudButtons();
   });
   $('downloadCloud').addEventListener('click', () => {
     if (!games.length || confirm('Заменить локальный каталог версией из D1?')) sync('download');
@@ -216,8 +242,7 @@
   window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(['home','orders','wishlist','add','settings'].includes(page))go(page)});
   const initial=location.hash.slice(1);go(['home','orders','wishlist','add','settings'].includes(initial)?initial:'home');render();
   try { cloud = JSON.parse(sessionStorage.getItem(cloudKey)); } catch { /* local mode */ }
-  $('workerUrl').value = cloud?.endpoint || localStorage.getItem('mbgp_v03_endpoint') || '';
-  $('accessToken').value = cloud?.token || '';
+  if (cloud?.endpoint !== workerEndpoint) cloud = null;
   cloudButtons();
   if (cloud) sync('connect');
 })();

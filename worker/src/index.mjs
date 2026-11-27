@@ -73,8 +73,8 @@ function clean(value, max) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
-async function upstream(url, accept) {
-  return fetch(url, { redirect: 'manual', headers: { accept }, signal: AbortSignal.timeout(10000) });
+async function upstream(url, accept, timeout = 10_000) {
+  return fetch(url, { redirect: 'manual', headers: { accept }, signal: AbortSignal.timeout(timeout) });
 }
 
 async function importGamefound(project) {
@@ -97,8 +97,39 @@ async function importGamefound(project) {
 }
 
 async function importKickstarter(project) {
-  const response = await upstream(`${project.url}/widget/card.html`, 'text/html');
-  if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) return null;
+  let reason = 'виджет не ответил';
+  try {
+    const response = await upstream(`${project.url}/widget/card.html`, 'text/html', 4_000);
+    reason = response.ok ? 'в виджете нет метаданных' : `виджет вернул HTTP ${response.status}`;
+    if (response.ok && response.headers.get('content-type')?.includes('text/html')) {
+      const data = await readKickstarterWidget(response, project);
+      if (data?.name) return data;
+    } else {
+      await response.body?.cancel();
+    }
+  } catch {
+    // Try the public metadata endpoint after a widget failure.
+  }
+
+  const api = new URL('https://api.microlink.io/');
+  api.searchParams.set('url', project.url);
+  const response = await upstream(api, 'application/json');
+  if (response.status === 429) {
+    return { rateLimited: true };
+  }
+  if (!response.ok) return null;
+  const { status, data } = JSON.parse(await readText(response, MAX_SOURCE_BYTES));
+  if (status !== 'success' || campaign(data?.url)?.url !== project.url) return null;
+  return {
+    name: clean(data.title, 300),
+    cover: httpsImage(data.image?.url, project.url),
+    description: clean(data.description, 5000),
+    publisher: clean(data.author, 300),
+    sourceNote: `Источник: Microlink, ${reason}. Поля без подтверждённых данных оставлены пустыми.`
+  };
+}
+
+async function readKickstarterWidget(response, project) {
   const html = await readText(response, MAX_SOURCE_BYTES);
   const embedded = html.match(/^\s*window\.ksr_track_properties\s*=\s*(\{[^\r\n]+\});\s*$/m);
   if (!embedded) return null;
@@ -154,6 +185,7 @@ export default {
       if (!project) return json({ error: 'Вставьте HTTPS-ссылку на кампанию Kickstarter или Gamefound.' }, 400);
       try {
         const data = await (project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
+        if (data?.rateLimited) return json({ error: 'Достигнут бесплатный лимит резервного источника Kickstarter. Попробуйте позже или заполните карточку вручную.' }, 429);
         if (data?.name) return json({ ...data, platform: project.platform });
       } catch {
         // An unavailable source must leave the editable form intact.

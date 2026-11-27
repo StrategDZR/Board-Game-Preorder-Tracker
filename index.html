@@ -83,18 +83,22 @@
           <div class="settings-actions"><button class="primary-button" id="exportBtn">Экспорт JSON</button><label class="secondary-button file-label">Импорт JSON<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
         </div>
         <div class="settings-card">
-          <h3>Облачное хранение</h3>
-          <form id="cloudForm" class="cloud-form">
-            <label>Адрес Cloudflare Worker<input id="workerUrl" type="url" required placeholder="https://имя.поддомен.workers.dev" autocapitalize="none"></label>
-            <label>Ключ доступа<input id="accessToken" type="password" required minlength="32" autocomplete="off" autocapitalize="none"></label>
+          <h3>Личный доступ</h3>
+          <button class="secondary-button" id="showLogin" type="button">Войти</button>
+          <form id="cloudForm" class="cloud-form" hidden>
+            <label>Ключ доступа<input id="accessToken" type="password" required minlength="32" autocomplete="current-password" autocapitalize="none"></label>
+            <button class="primary-button" type="submit" id="connectCloud">Войти</button>
+          </form>
+          <div id="cloudControls" hidden>
+            <h3>Облачное хранение</h3>
             <div class="settings-actions">
-              <button class="primary-button" type="submit" id="connectCloud">Подключить</button>
               <button class="secondary-button" type="button" id="downloadCloud">Загрузить из D1</button>
               <button class="secondary-button" type="button" id="uploadCloud">Отправить в D1</button>
+              <button class="secondary-button" type="button" id="logoutCloud">Выйти</button>
             </div>
-            <p class="muted" id="cloudStatus" role="status">Работаем с локальным каталогом.</p>
-          </form>
-          <p class="muted">Версия 0.3 · GitHub Pages + Cloudflare</p>
+          </div>
+          <p class="muted" id="cloudStatus" role="status" hidden></p>
+          <p class="muted">Версия 0.3.2</p>
         </div>
         <div class="settings-card"><h3>Проверка обновлений</h3><p>Автоматическое получение новостей и статусов с Kickstarter, Gamefound и магазинов пока не подключено. Кнопка проверки появится после интеграции источников.</p></div>
       </section>
@@ -110,6 +114,6 @@
   </div>
   <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.3.1"></script>
+  <script src="./app.js?v=0.3.2"></script>
 </body>
 </html>
