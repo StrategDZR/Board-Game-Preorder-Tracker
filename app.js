@@ -543,69 +543,95 @@
     $('formNote').textContent = 'Данные товара подставлены в пустые поля. Проверьте форму и нажмите «Сохранить игру».';
   }
 
-  function lavkaOrderTextItems(text) {
+  function orderTextItems(text, platform) {
     const items = [];
-    const money = /((?:\d{1,3}(?: \d{3})+|\d{1,9})(?:[.,]\d{1,2})?) *(?:₽|руб(?:лей|ля|\.)?|RUB|р\.)(?![а-яa-z])/giu;
-    const quantity = /(?:^|\s)(?:[xх×] *(\d+)|(\d+) *шт\.?)(?=\s|$)/iu;
-    const itemHeader = /^(?:товары?|наименование(?: товара)?|название(?: товара)?|позиция)$/i;
-    const priceHeader = /^цена(?: за (?:шт\.?|ед\.?|единицу))?(?:[, ]+(?:₽|руб\.?))?$/i;
-    const metadata = /^(?:заказ|итого|всего|к оплате|доставка|стоимость доставки|скидка|сумма|оплата|покупатель|получатель|телефон|контакт(?:ы)?|адрес|электронная почта|e-?mail|комментарий|статус|номер|дата|состав заказа|количество|цена|промокод|артикул|оплачено)(?=[\s:№#]|$)/iu;
+    const amountPattern = String.raw`(?:\d{1,3}(?:[ ,.'’]\d{3})+|\d{1,9})(?:[.,]\d{1,2})?`;
+    const currencyPattern = String.raw`(?:₽|руб(?:лей|ля|\.)?|RUB|р\.|EUR|€|USD|US\$|\$|GBP|£|RSD|дин\.?)`;
+    const money = new RegExp(`(${currencyPattern}) *(${amountPattern})|(${amountPattern}) *(${currencyPattern})(?!\\p{L})`, 'giu');
+    const quantity = /(?:^|\s)(?:[xх×] *(\d+)|(\d+) *(?:шт\.?|pcs?\.?))(?=\s|$)/iu;
+    const itemHeader = /^(?:товары?|наименование(?: товара)?|название(?: товара)?|позиция|products?|items?|(?:product |item )?name|description)$/i;
+    const priceHeader = /^(?:цена(?: за (?:шт\.?|ед\.?|единицу))?|стоимость|(?:unit )?(?:price|cost))(?=[\s:,(]|$)/i;
+    const columnLabel = /^(?:фото|изображение|количество|категория|настольные игры|photo|image|quantity|qty\.?|category|board games)$/i;
+    const footer = /^(?:итого|всего|к оплате|доставка|стоимость доставки|скидка|персональная скидка|оплата|покупатель|получатель|адрес|телефон|grand total|subtotal|total|shipping|delivery|discount|payment|billing|recipient|address|phone)(?=[\s:]|$)/i;
+    const metadata = /^(?:заказ|order|сумма|контакт(?:ы)?|электронная почта|e-?mail|комментарий|статус|номер|дата|состав заказа|количество|цена|стоимость|промо-код|промокод|артикул|оплачено|sku|date|status|contact|quantity|qty|price|unit price)(?=[\s:№#]|$)/i;
     let columns = null;
+    let flatTable = false;
     let entry = null;
 
     const cleanName = value => value.replace(/^[•‣▪]\s*/, '').replace(/\s*[:;|—–-]+\s*$/, '').trim();
-    const isProductName = name => /\p{L}/u.test(name) && !metadata.test(name) && !itemHeader.test(name) &&
-      !/https?:\/\/|@/.test(name);
-    const normalizePrice = value => value.replace(/ /g, '').replace(',', '.');
-    const add = (name, price = '') => items.push({
-      name: name.slice(0, 300), platform: 'Lavka Games', price, currency: price ? 'RUB' : ''
-    });
+    const isProductName = (name, hasPrice) => /\p{L}/u.test(name) && !metadata.test(name) && (hasPrice || !itemHeader.test(name)) &&
+      !footer.test(name) && !columnLabel.test(name) && !/https?:\/\/|@/.test(name);
+    const parseAmount = (value, unit) => {
+      const currency = /^(?:RUB|₽|руб|р\.)/i.test(unit) ? 'RUB' :
+        ({ '€': 'EUR', '£': 'GBP', 'US$': 'USD', 'ДИН.': 'RSD', 'ДИН': 'RSD' })[unit.toUpperCase()] || unit.toUpperCase();
+      const decimal = value.match(/[.,](\d{1,2})$/);
+      const integer = (decimal ? value.slice(0, decimal.index) : value).replace(/[ ,.'’]/g, '');
+      return /^\d{1,9}$/.test(integer) ? { price: integer + (decimal ? '.' + decimal[1] : ''), currency } : null;
+    };
+    const pricesIn = value => Array.from(value.matchAll(money), match => ({
+      index: match.index, amount: parseAmount(match[2] || match[3], match[1] || match[4])
+    })).filter(match => match.amount);
+    const add = (name, amount) => {
+      const knownAmount = amount?.currency === '$' ? null : amount;
+      items.push({ name: name.slice(0, 300), platform, price: knownAmount?.price || '', currency: knownAmount?.currency || '' });
+    };
     const finish = () => {
       if (entry?.prices.length) {
         const [first, second] = entry.prices;
         const unit = entry.explicitPrice || (!entry.count || entry.count === 1 ||
-          (second && Number(first) * entry.count === Number(second)) ? first : '');
+          (second?.currency === first.currency &&
+            Math.round(Number(first.price) * entry.count * 100) === Math.round(Number(second.price) * 100)) ? first : null);
         add(entry.name, unit);
       }
       entry = null;
     };
 
     for (const raw of text.replace(/[\u00a0\u202f]/g, ' ').replace(/\r\n?/g, '\n').split('\n')) {
-      const line = raw.trim();
+      const line = raw.trim().replace(/\\$/, '').trimEnd();
       if (!line) continue;
       const cells = line.split(/\t+| {2,}/).map(cell => cell.trim());
       const nameColumn = cells.findIndex(cell => itemHeader.test(cell));
       const priceColumn = cells.findIndex(cell => priceHeader.test(cell));
       if (nameColumn >= 0 && priceColumn >= 0) {
         finish();
-        columns = { name: nameColumn, price: priceColumn };
+        columns = { name: nameColumn, price: priceColumn, currency: cells[priceColumn].match(new RegExp(currencyPattern, 'iu'))?.[0] };
         continue;
       }
-      if (/^(?:итого|всего|к оплате|оплата|адрес доставки|получатель)(?=[\s:]|$)/i.test(line)) {
+      if (itemHeader.test(line)) {
+        finish();
+        flatTable = true;
+        continue;
+      }
+      if (columnLabel.test(line) || priceHeader.test(line) && !/\d/.test(line)) continue;
+      if (footer.test(line)) {
         finish();
         if (items.length) break;
+        continue;
       }
       if (columns && cells.length > Math.max(columns.name, columns.price)) {
         const name = cleanName(cells[columns.name]);
-        const amount = cells[columns.price].match(/^(\d[\d ]*(?:[.,]\d{1,2})?)\s*(?:₽|руб\.?|RUB)?$/i);
-        if (isProductName(name) && amount) {
+        const value = cells[columns.price];
+        const amount = pricesIn(value)[0]?.amount || (columns.currency && new RegExp(`^${amountPattern}$`).test(value) ?
+          parseAmount(value, columns.currency) : null);
+        if (amount && isProductName(name, true)) {
           finish();
-          add(name, normalizePrice(amount[1]));
+          add(name, amount);
           continue;
         }
       }
-      const prices = Array.from(line.matchAll(money));
+      const prices = pricesIn(line);
       const count = line.match(quantity);
-      const labeledCount = line.match(/^количество\s*[:—-]?\s*(\d{1,3})(?:\s*шт\.?)?$/i);
+      const labeledCount = line.match(/^(?:количество|quantity|qty\.?)\s*[:—-]?\s*(\d{1,3})(?:\s*шт\.?)?$/i);
       if (labeledCount && entry) {
         entry.count = Number(labeledCount[1]);
         continue;
       }
       const prefix = prices.length ? line.slice(0, prices[0].index) : line;
       const name = cleanName(prefix.replace(quantity, ''));
-      if (isProductName(name)) {
+      if (isProductName(name, prices.length > 0)) {
+        if (flatTable && entry && !entry.prices.length && !prices.length) continue;
         finish();
-        entry = { name, prices: [], count: 0, explicitPrice: '' };
+        entry = { name, prices: [], count: 0, explicitPrice: null };
       } else if (metadata.test(line) && !priceHeader.test(cleanName(prefix))) {
         finish();
         continue;
@@ -613,7 +639,7 @@
       if (!entry) continue;
       if (count) entry.count = Number(count[1] || count[2]);
       else if (/^\d{1,3}$/.test(line)) entry.count = Number(line);
-      const amounts = prices.map(match => normalizePrice(match[1]));
+      const amounts = prices.map(match => match.amount);
       if (priceHeader.test(cleanName(prefix)) && amounts.length) entry.explicitPrice = amounts[0];
       entry.prices.push(...amounts);
     }
@@ -646,9 +672,9 @@
       note.textContent = 'Скопируйте только список товаров с ценами.';
       return;
     }
-    const items = lavkaOrderTextItems(input.value);
+    const items = orderTextItems(input.value, platformFromUrl($('url').value));
     if (!items.length) {
-      note.textContent = 'Товары не найдены. Вставьте названия и цены в рублях, например «Название игры — 2 450 ₽».';
+      note.textContent = 'Товары не найдены. Вставьте названия и цены с валютой, например «Название игры — 2 450 ₽».';
       return;
     }
     const previousFields = importedOrderFields;
