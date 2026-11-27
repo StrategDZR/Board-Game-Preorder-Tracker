@@ -15,6 +15,8 @@
   let change = 0;
   let formVersion = 0;
   let importRequest;
+  let updatesRequest;
+  let catalogGeneration = 0;
   function readSetting(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
   }
@@ -75,12 +77,12 @@
     go(game.type === 'wishlist' ? 'wishlist' : 'orders');
     toast(index >= 0 ? 'Изменения сохранены' : 'Игра добавлена');
   });
-  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(statusLabels[g.status]||'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Начало кампании', g.campaignStart], ['Конец кампании', g.campaignEnd], ['Описание', g.description]].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${g.eta?`<p><b>Ожидаемая дата:</b> ${esc(g.eta)}</p>`:''}${g.type==='order'&&(g.price||g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}<br><b>Доставка:</b> ${esc(g.shipping||'—')} ${esc(g.currency)}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
+  function showDetail(id){const g=games.find(x=>x.id===id);if(!g)return;const d=$('detailContent');const url=webUrl(g.url);d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(statusLabels[g.status]||'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Начало кампании', g.campaignStart], ['Конец кампании', g.campaignEnd], ['Описание', g.description]].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${g.eta?`<p><b>Ожидаемая дата:</b> ${esc(g.eta)}</p>`:''}${g.type==='order'&&(g.price||g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}<br><b>Доставка:</b> ${esc(g.shipping||'—')} ${esc(g.currency)}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions"><button class="primary-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;$('detailDialog').showModal();$('editGame').onclick=()=>{ $('detailDialog').close();editGame(g)};$('deleteGame').onclick=()=>{if(confirm('Удалить эту запись?')){games=games.filter(x=>x.id!==id);save();$('detailDialog').close();toast('Запись удалена')}}}
   function editGame(g){editingId=g.id;cancelImport();$('gameId').value=g.id;$('formTitle').textContent='Редактировать игру';for(const id of fields)$(id).value=g[id]??'';$('orderFields').style.display=g.type==='order'?'block':'none';$('cancelEdit').style.display='inline-block';go('add')}
   $('closeDialog').addEventListener('click',()=>$('detailDialog').close());
   function exportJson(){const blob=new Blob([JSON.stringify({app:'My Board Games Preorders',version:2,exportedAt:new Date().toISOString(),games},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-board-games-preorders-backup.json';a.click();URL.revokeObjectURL(a.href);toast('Резервная копия подготовлена')}
   $('exportBtn').addEventListener('click',exportJson);$('backupBtn').addEventListener('click',exportJson);
-  $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){const ids=new Set();games=incoming.map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
+  $('importFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());const incoming=Array.isArray(data)?data:data.games;if(!Array.isArray(incoming)||incoming.some(g=>!g||typeof g.name!=='string'||!['order','wishlist'].includes(g.type)))throw new Error('Неверный формат');if(confirm(`Импортировать ${incoming.length} записей? Текущий список будет заменён.`)){catalogGeneration++;const ids=new Set();games=incoming.map(g=>{let id=String(g.id||crypto.randomUUID());if(ids.has(id))id=crypto.randomUUID();ids.add(id);return {...g,id}});save();toast('Данные импортированы')}}catch{toast('Не удалось прочитать JSON-файл')}e.target.value=''});
   function cloudResponseMessage(status, body, data) {
     if (typeof data?.error === 'string') return data.error;
     if (/\b(?:error\s+(?:code\s*)?:?\s*1027|daily request limit)\b/i.test(body)) {
@@ -106,6 +108,124 @@
     if (!data) throw new Error('Worker вернул некорректный ответ.');
     return data;
   }
+
+  function updateProject(value) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port) return '';
+      const match = url.pathname.match(/^\/(?:[a-z]{2}\/)?projects\/([a-z\d][a-z\d_-]*\/[a-z\d][a-z\d_-]*)(?:\/|$)/i);
+      if (!match) return '';
+      if (['kickstarter.com', 'www.kickstarter.com'].includes(url.hostname)) {
+        return 'https://www.kickstarter.com/projects/' + match[1];
+      }
+      if (['gamefound.com', 'www.gamefound.com'].includes(url.hostname)) {
+        return 'https://gamefound.com/en/projects/' + match[1];
+      }
+    } catch { /* An invalid URL cannot be checked. */ }
+    return '';
+  }
+
+  function renderHistory(game) {
+    const history = Array.isArray(game.updateHistory) ? game.updateHistory : [];
+    if (game.type !== 'order') return '';
+    const entries = history.map(entry => {
+      if (!entry || typeof entry.title !== 'string') return '';
+      const label = esc(entry.title);
+      const url = webUrl(entry.url);
+      const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+      return `<li>${title} <small>#${esc(entry.number)}${entry.published ? ' · ' + esc(entry.published) : ''}</small></li>`;
+    }).join('');
+    return `<section class="update-history"><h3>История обновлений</h3>${entries ? '<ul>' + entries + '</ul>' : '<p>Обновлений пока нет.</p>'}</section>`;
+  }
+
+  function updateEligible(game) {
+    return game.type === 'order' && game.status !== 'delivered';
+  }
+
+  function addUpdates(game, result) {
+    if (!Array.isArray(result.updates) || !result.updates.length) return 0;
+    const history = Array.isArray(game.updateHistory) ? game.updateHistory.filter(Boolean) : [];
+    const latest = Math.max(0, ...history.filter(entry => entry.campaign === result.campaign &&
+      Number.isSafeInteger(entry.number)).map(entry => entry.number));
+    const seen = new Set();
+    const fresh = result.updates.filter(entry => {
+      if (!Number.isSafeInteger(entry?.number) || entry.number <= latest || seen.has(entry.number) ||
+          typeof entry.title !== 'string' || !entry.title || !webUrl(entry.url)) return false;
+      seen.add(entry.number);
+      return true;
+    }).sort((a, b) => b.number - a.number).slice(0, latest ? 30 : 5);
+    if (!fresh.length) return 0;
+    game.updateHistory = fresh.map(entry => ({ ...entry, campaign: result.campaign })).concat(history).slice(0, 30);
+    game.updated = Date.now();
+    return fresh.length;
+  }
+
+  async function checkUpdates(manual = false) {
+    const status = $('updatesStatus');
+    if (updatesRequest) return;
+    if (!signedIn) {
+      if (manual) status.textContent = 'Войдите через «Ещё → Личный доступ», чтобы проверить обновления.';
+      return;
+    }
+    const projects = new Map();
+    for (const game of games.filter(updateEligible)) {
+      const project = updateProject(game.url);
+      if (!project) continue;
+      if (!projects.has(project)) projects.set(project, []);
+      projects.get(project).push(game.id);
+    }
+    if (!projects.size) {
+      if (manual) status.textContent = 'Нет активных предзаказов со ссылкой на Kickstarter или Gamefound.';
+      return;
+    }
+    const request = new AbortController();
+    updatesRequest = request;
+    const generation = catalogGeneration;
+    $('checkUpdates').disabled = true;
+    status.textContent = 'Проверяем публикации кампаний…';
+    const found = [];
+    const errors = [];
+    try {
+      const entries = [...projects];
+      for (let index = 0; index < entries.length && !request.signal.aborted; index += 2) {
+        await Promise.all(entries.slice(index, index + 2).map(async ([url, ids]) => {
+          const controller = new AbortController();
+          const cancel = () => controller.abort();
+          request.signal.addEventListener('abort', cancel, { once: true });
+          const timeout = setTimeout(cancel, 18_000);
+          try {
+            const result = await api('/api/updates?url=' + encodeURIComponent(url), { signal: controller.signal });
+            if (result.campaign !== url || !Array.isArray(result.updates)) throw new Error('Некорректный список обновлений.');
+            found.push({ url, ids, result });
+          } catch (error) {
+            errors.push(error.status ? error.message : 'Источник не ответил вовремя.');
+          } finally {
+            clearTimeout(timeout);
+            request.signal.removeEventListener('abort', cancel);
+          }
+        }));
+      }
+      if (request.signal.aborted || generation !== catalogGeneration) {
+        if (!request.signal.aborted) status.textContent = 'Каталог изменился. Запустите проверку ещё раз.';
+        return;
+      }
+      let added = 0;
+      for (const { url, ids, result } of found) {
+        for (const game of games) {
+          if (ids.includes(game.id) && updateEligible(game) && updateProject(game.url) === url) {
+            added += addUpdates(game, result);
+          }
+        }
+      }
+      if (added) save();
+      const summary = found.length ? (added ? `Добавлено в историю: ${added}.` : 'Новых публикаций нет.') : '';
+      status.textContent = [summary, errors.length ? `Не удалось проверить кампаний: ${errors.length}. ${errors[0]}` : ''].filter(Boolean).join(' ');
+    } finally {
+      updatesRequest = null;
+      $('checkUpdates').disabled = false;
+    }
+  }
+  $('checkUpdates').addEventListener('click', () => checkUpdates(true));
 
   $('fetchGame').addEventListener('click', async () => {
     const note = $('formNote');
@@ -163,6 +283,7 @@
     const endpoint = cloud.endpoint;
     const start = change;
     let continueSaving = false;
+    let checkOnConnect = false;
     cloudStatus('Связываемся с D1…');
     try {
       const remote = mode === 'auto' ? null : await api('/api/catalog');
@@ -177,6 +298,7 @@
           (knownEndpoint && !state.dirty || !knownEndpoint && !games.length))) {
         if (change !== start) throw new Error('Локальный каталог изменился. Повторите загрузку.');
         games = remote.games;
+        catalogGeneration++;
         if (editingId) resetForm();
         if ($('detailDialog').open) $('detailDialog').close();
         writeLocal();
@@ -196,6 +318,7 @@
         setState({ endpoint, revision: result.revision, dirty: continueSaving });
       }
       cloudStatus('Каталог синхронизирован с D1.');
+      checkOnConnect = mode === 'connect';
     } catch (error) {
       if (error.status === 401) {
         signedIn = false;
@@ -213,6 +336,7 @@
       cloudButtons();
     }
     if (continueSaving) sync('auto');
+    if (checkOnConnect) checkUpdates();
   }
 
   $('cloudForm').addEventListener('submit', event => {
@@ -227,6 +351,8 @@
   });
   $('logoutCloud').addEventListener('click', () => {
     cancelImport();
+    updatesRequest?.abort();
+    $('updatesStatus').textContent = '';
     cloud = null;
     signedIn = false;
     sessionStorage.removeItem(cloudKey);

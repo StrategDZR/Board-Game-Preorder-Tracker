@@ -15,3 +15,6 @@
 #formNote { margin: 8px 0 16px; }
 .form-grid label { min-width: 0; }
 button:disabled { opacity: .55; cursor: default; }
+.update-history li { margin-bottom: 8px; font-size: 13px; overflow-wrap: anywhere; }
+.update-history a { color: var(--gold); }
+.update-history small { color: var(--muted); }

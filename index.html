@@ -34,6 +34,8 @@
       <section class="page" id="page-orders">
         <div class="eyebrow">ТВОИ ПРОЕКТЫ</div><h1>Предзаказы</h1>
         <div class="toolbar"><input id="orderSearch" class="search" placeholder="Найти игру…" autocomplete="off"><button class="primary-button compact" data-go="add">＋ Добавить</button></div>
+        <button type="button" class="secondary-button" id="checkUpdates">Проверить сейчас</button>
+        <p id="updatesStatus" class="form-note" role="status"></p>
         <div id="ordersList" class="card-list"></div>
         <div id="ordersEmpty" class="empty-state"><div class="empty-icon">♧</div><b>Предзаказов пока нет</b><p>Добавь игру по ссылке или вручную.</p><button class="primary-button" data-go="add">Добавить игру</button></div>
       </section>
@@ -98,9 +100,8 @@
             </div>
           </div>
           <p class="muted" id="cloudStatus" role="status" hidden></p>
-          <p class="muted">Версия 0.3.2</p>
+          <p class="muted">Версия 0.4</p>
         </div>
-        <div class="settings-card"><h3>Проверка обновлений</h3><p>Автоматическое получение новостей и статусов с Kickstarter, Gamefound и магазинов пока не подключено. Кнопка проверки появится после интеграции источников.</p></div>
       </section>
     </main>
 
@@ -114,6 +115,6 @@
   </div>
   <dialog id="detailDialog" class="detail-dialog"><div id="detailContent"></div><button class="secondary-button dialog-close" id="closeDialog">Закрыть</button></dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.3.2"></script>
+  <script src="./app.js?v=0.4"></script>
 </body>
 </html>
