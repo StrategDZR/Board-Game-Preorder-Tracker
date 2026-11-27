@@ -20,6 +20,8 @@
   let change = 0;
   let formVersion = 0;
   let importRequest;
+  let orderItems = [];
+  let importedOrderFields = {};
   let updatesRequest;
   let catalogGeneration = 0;
   let state = {};
@@ -148,7 +150,11 @@
     importRequest?.abort();
     importRequest = null;
     $('fetchGame').disabled = false;
-    $('formNote').textContent = 'Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.';
+    $('formNote').textContent = '';
+    orderItems = [];
+    importedOrderFields = {};
+    $('orderItem').replaceChildren();
+    $('orderItemField').hidden = true;
   }
   $('url').addEventListener('input', cancelImport);
   function normalizeDeliveryDates(catalog) {
@@ -394,8 +400,132 @@
   async function importMetadata(url, signal) {
     const product = direWolfProductUrl(url);
     if (product) return directDireWolf(product, signal);
-    return api('/api/import?url=' + encodeURIComponent(url), { signal });
+    const source = webUrl(url);
+    const publicUrl = source && new URL(source);
+    if (publicUrl && publicUrl.protocol === 'https:' && !publicUrl.port && !publicUrl.username && !publicUrl.password) {
+      const campaignUrl = updateProject(publicUrl.href);
+      const path = publicUrl.pathname;
+      const gaga = ['gaga.ru', 'www.gaga.ru'].includes(publicUrl.hostname) && /^\/game\/[a-z\d][a-z\d_-]*\/?$/i.test(path);
+      const lavka = ['lavkaigr.ru', 'www.lavkaigr.ru'].includes(publicUrl.hostname) &&
+        /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(path) && !/^\/shop\/factory\//i.test(path);
+      if (campaignUrl || gaga || lavka) {
+        return api('/api/import?url=' + encodeURIComponent(campaignUrl || publicUrl.origin + path), { signal });
+      }
+    }
+    throw Object.assign(new Error('Для закрытого заказа сохраните страницу из личного кабинета и выберите её в разделе «Импорт закрытого заказа из HTML». Для импорта по ссылке укажите публичную кампанию или товар поддерживаемого магазина.'), { status: 400 });
   }
+
+  function orderProductRows(html, source) {
+    // Template contents stay inert. Never insert the saved order into the live document.
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const root = template.content;
+    for (const element of root.querySelectorAll('script,style,noscript,iframe,svg,form input,form textarea')) element.remove();
+    const text = element => (element?.textContent || '').replace(/\s+/g, ' ').trim();
+    const platform = ['lavkaigr.ru', 'www.lavkaigr.ru'].includes(source.hostname) ? 'Lavka Games' : '';
+    const orderNumber = platform && source.pathname.match(/^\/accounts\/profile\/order\/(\d+)\/?$/i)?.[1];
+    if (platform && !orderNumber) return [];
+    const headingNumbers = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6,title'), element =>
+      text(element).match(/заказ[^\d]{0,12}(\d+)/i)?.[1]).filter(Boolean);
+    if (orderNumber && headingNumbers.length && !headingNumbers.includes(orderNumber)) return [];
+
+    const items = [];
+    for (const table of root.querySelectorAll('table')) {
+      let nameColumn = -1;
+      let priceColumn = -1;
+      for (const row of table.rows) {
+        const cells = Array.from(row.cells);
+        const headings = cells.map(text);
+        const heading = headings.findIndex(value => /^(?:наименование(?: товара)?|товар(?:ы)?|название(?: товара)?|позиция|items?|products?|description)$/i.test(value));
+        if (heading >= 0 && cells.length > 1) {
+          nameColumn = heading;
+          priceColumn = headings.findIndex(value => /^(?:цена(?: за (?:ед\.?|шт\.?|единицу))?|(?:unit )?price)(?:\s*[,(/].*)?$/i.test(value));
+          continue;
+        }
+        if (nameColumn >= 0 && (cells.some(cell => cell.colSpan !== 1) || cells.length <= nameColumn)) continue;
+        const lavkaLink = headingNumbers.includes(orderNumber) && Array.from(row.querySelectorAll('a[href]')).find(anchor => {
+          try {
+            const url = new URL(anchor.getAttribute('href'), source);
+            return ['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) &&
+              /^\/shop\/(?!factory\/)[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(url.pathname) && text(anchor);
+          } catch { return false; }
+        });
+        const cell = cells[nameColumn];
+        const name = text(lavkaLink || cell?.querySelector('a[href]') || cell).slice(0, 300);
+        if (!name || /^(?:итого|доставка|скидка|total|shipping|discount)(?:\s|:|$)/i.test(name)) continue;
+        const amount = text(cells[priceColumn]).match(/^([\d ]+)(?:[.,](\d{1,2}))?\s*(₽|руб\.?|RUB|EUR|USD|GBP|RSD|€|£)?$/i);
+        const price = amount ? amount[1].replace(/ /g, '') + (amount[2] ? '.' + amount[2] : '') : '';
+        const unit = amount?.[3]?.toUpperCase();
+        const currency = /^(?:₽|РУБ\.?|RUB)$/.test(unit) || !unit && platform ? 'RUB' :
+          ({ '€': 'EUR', '£': 'GBP' })[unit] || unit || '';
+        const hasPrice = /^\d{1,9}(?:\.\d{1,2})?$/.test(price) && Boolean(currency);
+        items.push({ name, platform, price: hasPrice ? price : '', currency: hasPrice ? currency : '' });
+      }
+    }
+    return items;
+  }
+
+  function showImportedOrderItem(index) {
+    const item = orderItems[index];
+    if (!item) return;
+    if (['price', 'currency'].some(field => field in importedOrderFields && $(field).value !== importedOrderFields[field])) {
+      delete importedOrderFields.price;
+      delete importedOrderFields.currency;
+    }
+    for (const [id, value] of Object.entries(importedOrderFields)) {
+      if ($(id).value === value) $(id).value = '';
+    }
+    importedOrderFields = fillImportedFields(item, readImportFields());
+    $('formNote').textContent = 'Данные товара подставлены в пустые поля. Проверьте форму и нажмите «Сохранить игру».';
+  }
+
+  $('orderItem').addEventListener('change', () => showImportedOrderItem($('orderItem').value));
+  $('orderHtml').addEventListener('change', async () => {
+    const file = $('orderHtml').files[0];
+    $('orderHtml').value = '';
+    if (!file || !signedIn) return;
+    cancelImport();
+    const version = formVersion;
+    const note = $('formNote');
+    const value = webUrl($('url').value.trim());
+    const source = value && new URL(value);
+    if (!source || source.username || source.password) {
+      note.textContent = 'Вставьте ссылку на страницу заказа и выберите файл ещё раз.';
+      return;
+    }
+    if (!/\.html?$/i.test(file.name) || file.size > 8_000_000) {
+      note.textContent = 'Выберите HTML-файл размером до 8 МБ.';
+      return;
+    }
+    try {
+      const bytes = await file.arrayBuffer();
+      if (version !== formVersion) return;
+      const head = new TextDecoder().decode(bytes.slice(0, 4096));
+      const encoding = /charset\s*=\s*["']?(?:windows-1251|cp1251)/i.test(head) ? 'windows-1251' : 'utf-8';
+      orderItems = orderProductRows(new TextDecoder(encoding).decode(bytes), source);
+      if (!orderItems.length) {
+        note.textContent = 'В HTML не найдены товары заказа. Проверьте, что сохранили открытую страницу заказа после входа.';
+        return;
+      }
+      source.search = '';
+      source.hash = '';
+      $('url').value = source.href;
+      $('type').value = 'order';
+      showTypeFields();
+      if (orderItems.length === 1) {
+        showImportedOrderItem(0);
+      } else {
+        const select = $('orderItem');
+        select.add(new Option('Выберите товар', ''));
+        select.options[0].disabled = true;
+        orderItems.forEach((item, index) => select.add(new Option(item.name, String(index))));
+        $('orderItemField').hidden = false;
+        note.textContent = 'Выберите товар. Каждая карточка хранит одну игру.';
+      }
+    } catch {
+      if (version === formVersion) note.textContent = 'Не удалось прочитать HTML-файл заказа.';
+    }
+  });
 
   function updateProject(value) {
     try {
@@ -565,6 +695,29 @@
   }
   $('checkUpdates').addEventListener('click', () => checkUpdates(true));
 
+  function readImportFields() {
+    return Object.fromEntries(importFields.map(id => [id, $(id).value]));
+  }
+
+  function fillImportedFields(result, before) {
+    const filled = {};
+    const fill = (id, value) => {
+      $(id).value = value;
+      if ($(id).value) filled[id] = $(id).value;
+    };
+    for (const id of importFields) {
+      if (id === 'price' || id === 'currency' && result.price ||
+          id === 'campaignEnd' && $('type').value !== 'order') continue;
+      if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') fill(id, result[id]);
+    }
+    if (result.price && result.currency && !before.price && !$('price').value &&
+        $('currency').value === before.currency && (!before.currency || before.currency === result.currency)) {
+      if (!before.currency) fill('currency', result.currency);
+      fill('price', result.price);
+    }
+    return filled;
+  }
+
   $('fetchGame').addEventListener('click', async () => {
     const note = $('formNote');
     if (!signedIn) {
@@ -573,29 +726,21 @@
     }
     const url = $('url').value.trim();
     if (!url || !$('url').reportValidity()) {
-      note.textContent = 'Вставьте ссылку на кампанию.';
+      note.textContent = 'Вставьте ссылку на кампанию или товар.';
       return;
     }
+    cancelImport();
     const version = formVersion;
     const controller = new AbortController();
     importRequest = controller;
     const timeout = setTimeout(() => controller.abort(), 18000);
-    const before = Object.fromEntries(importFields.map(id => [id, $(id).value]));
+    const before = readImportFields();
     $('fetchGame').disabled = true;
-    note.textContent = 'Получаем данные кампании…';
+    note.textContent = 'Получаем данные страницы…';
     try {
       const result = await importMetadata(url, controller.signal);
       if (version !== formVersion) return;
-      for (const id of importFields) {
-        if (id === 'price' || id === 'currency' && result.price ||
-            id === 'campaignEnd' && $('type').value !== 'order') continue;
-        if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') $(id).value = result[id];
-      }
-      if (result.price && result.currency && !before.price && !$('price').value &&
-          $('currency').value === before.currency && (!before.currency || before.currency === result.currency)) {
-        $('currency').value = result.currency;
-        $('price').value = result.price;
-      }
+      fillImportedFields(result, before);
       note.textContent = 'Доступные данные подставлены в пустые поля. Проверьте форму и сохраните игру.' +
         (typeof result.sourceNote === 'string' ? ' ' + result.sourceNote : '');
     } catch (error) {

@@ -68,6 +68,11 @@ function storeFromUrl(url) {
     const product = url.pathname.match(/^\/game\/([a-z\d][a-z\d_-]*)\/?$/i);
     return { platform: 'GaGa Games', store: true, url: product ? `https://gaga.ru/game/${product[1]}/` : '' };
   }
+  if (['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) &&
+      /^\/shop\/[a-z\d_-]+\/[a-z\d_-]+\/?$/i.test(url.pathname) &&
+      !/^\/shop\/factory\//i.test(url.pathname)) {
+    return { platform: 'Lavka Games', store: true, url: 'https://www.lavkaigr.ru' + url.pathname.replace(/\/?$/, '/') };
+  }
   return null;
 }
 
@@ -92,10 +97,10 @@ async function upstream(url, accept, timeout = 10_000) {
   return fetch(url, { redirect: 'manual', headers: { accept }, signal: AbortSignal.timeout(timeout) });
 }
 
-async function importGamefound(project) {
+async function readGamefoundApi(project) {
   const api = new URL('https://gamefound.com/api/public/projects/getCrowdfundingProject');
   api.searchParams.set('urlName', project.slug);
-  const response = await upstream(api, 'application/json');
+  const response = await upstream(api, 'application/json', 5_000);
   if (!response.ok) return null;
   const data = JSON.parse(await readText(response, MAX_SOURCE_BYTES));
   if (data.projectUrlName?.toLowerCase() !== project.slug.toLowerCase() ||
@@ -111,10 +116,21 @@ async function importGamefound(project) {
   };
 }
 
-async function importStore(product) {
-  const response = await upstream(product.url, 'text/html');
+async function importGamefound(project) {
+  try {
+    const data = await readGamefoundApi(project);
+    if (data?.name) return data;
+  } catch { /* Try the public project page. */ }
+  return importPublicPage(project);
+}
+
+async function importPublicPage(project) {
+  const response = await upstream(project.url, 'text/html', 4_000);
   const contentType = response.headers.get('content-type') || '';
-  if (!response.ok || !contentType.toLowerCase().includes('text/html')) return null;
+  if (!response.ok || !contentType.toLowerCase().includes('text/html')) {
+    await response.body?.cancel();
+    return null;
+  }
   const encoding = /charset\s*=\s*["']?(?:windows-1251|cp1251)/i.test(contentType) ? 'windows-1251' : 'utf-8';
   const html = await readText(response, MAX_SOURCE_BYTES, encoding);
   const fields = new Map();
@@ -124,22 +140,36 @@ async function importStore(product) {
   let name = '';
   const rewriter = new HTMLRewriter()
     .on('head meta[property^="og:"]', { element(el) { set(el.getAttribute('property'), el.getAttribute('content')); } })
-    .on('h1[itemprop="name"]', { text(chunk) { if (name.length < 300) name += chunk.text; } })
+    .on('head link[rel="canonical"]', { element(el) { set('canonical', el.getAttribute('href')); } })
+    .on('h1[itemprop="name"], h2.game-name[itemprop="name"]', { text(chunk) { if (name.length < 300) name += chunk.text; } })
     .on('[itemprop="brand"]', { element(el) { set('brand', el.getAttribute('content')); } })
     .on('main .detail-card meta[itemprop="priceCurrency"]', { element(el) { set('storeCurrency', el.getAttribute('content')); } })
     .on('main .detail-card .card-btns [data-vendor]', {
       element(el) { set('vendor', el.getAttribute('data-vendor')); set('storePrice', el.getAttribute('data-price')); }
     });
+  if (project.platform === 'Lavka Games') {
+    rewriter.on('meta[itemprop="price"], meta[itemprop="priceCurrency"]', {
+      element(el) { set(el.getAttribute('itemprop'), el.getAttribute('content')); }
+    });
+  }
   const body = rewriter.transform(new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })).body;
   for await (const chunk of body) { /* Consume rewritten HTML to collect fields. */ }
-  const canonical = campaign(fields.get('og:url'));
-  if (canonical?.url !== product.url || !name.trim()) return null;
-  const currency = fields.get('og:price:currency') || fields.get('storeCurrency');
-  const price = fields.get('og:price:amount') || fields.get('storePrice');
-  const hasPrice = CURRENCIES.includes(currency) && typeof price === 'string' && /^\d{1,9}(?:\.\d{1,2})?$/.test(price);
+  const identity = fields.get('og:url') || fields.get('canonical');
+  if (!identity) return null;
+  const canonical = new URL(identity, project.url);
+  // Lavka emits an HTTP canonical even on its HTTPS product page.
+  if (project.platform === 'Lavka Games' && canonical.protocol === 'http:') canonical.protocol = 'https:';
+  if (campaign(canonical.href)?.url !== project.url ||
+      (!project.store && !/^\/(?:[a-z]{2}\/)?projects\/[^/]+\/[^/]+\/?$/i.test(canonical.pathname))) return null;
+  const title = clean((name.trim() || fields.get('og:title') || '').replace(/\s+/g, ' '), 300);
+  if (!title || (['GaGa Games', 'Lavka Games'].includes(project.platform) && !name.trim())) return null;
+  const currency = fields.get('og:price:currency') || fields.get('storeCurrency') || fields.get('priceCurrency');
+  const price = fields.get('og:price:amount') || fields.get('storePrice') || fields.get('price');
+  const hasPrice = project.store && CURRENCIES.includes(currency) &&
+    typeof price === 'string' && /^\d{1,9}(?:\.\d{1,2})?$/.test(price);
   return {
-    name: clean(name.replace(/\s+/g, ' '), 300),
-    cover: httpsImage(fields.get('og:image:secure_url') || fields.get('og:image'), product.url),
+    name: title,
+    cover: httpsImage(fields.get('og:image:secure_url') || fields.get('og:image'), project.url),
     description: clean(fields.get('og:description'), 5000),
     publisher: clean(fields.get('brand') || fields.get('vendor'), 300),
     price: hasPrice ? price : '',
@@ -148,23 +178,30 @@ async function importStore(product) {
 }
 
 async function importKickstarter(project) {
-  let reason = 'виджет не ответил';
+  let page;
+  try { page = await importPublicPage(project); } catch { /* Try the official widget. */ }
+
+  let reason = 'публичная страница и виджет недоступны';
   try {
     const response = await upstream(`${project.url}/widget/card.html`, 'text/html', 4_000);
     reason = response.ok ? 'в виджете нет метаданных' : `виджет вернул HTTP ${response.status}`;
     if (response.ok && response.headers.get('content-type')?.includes('text/html')) {
       const data = await readKickstarterWidget(response, project);
-      if (data?.name) return data;
+      if (data?.name) {
+        if (!page) return data;
+        return { ...page, ...Object.fromEntries(Object.entries(data).filter(([, value]) => value)) };
+      }
     } else {
       await response.body?.cancel();
     }
   } catch {
-    // Try the public metadata endpoint after a widget failure.
+    // The page can still provide a title and description.
   }
+  if (page) return page;
 
   const api = new URL('https://api.microlink.io/');
   api.searchParams.set('url', project.url);
-  const response = await upstream(api, 'application/json');
+  const response = await upstream(api, 'application/json', 5_000);
   if (response.status === 429) {
     return { rateLimited: true };
   }
@@ -310,10 +347,10 @@ export default {
 
     if (url.pathname === '/api/import' && request.method === 'GET') {
       const project = campaign(url.searchParams.get('url'));
-      if (!project) return json({ error: 'Вставьте HTTPS-ссылку на кампанию Kickstarter или Gamefound либо на товар Dire Wolf или GaGa.' }, 400);
+      if (!project) return json({ error: 'Вставьте HTTPS-ссылку на публичную кампанию или товар поддерживаемого магазина. Для закрытого заказа используйте импорт из HTML.' }, 400);
       if (!project.url) return json({ error: 'Откройте конкретную игру в магазине и вставьте ссылку на её страницу.' }, 400);
       try {
-        const data = await (project.store ? importStore(project) :
+        const data = await (project.store ? importPublicPage(project) :
           project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
         if (data?.rateLimited) return json({ error: 'Достигнут бесплатный лимит резервного источника Kickstarter. Попробуйте позже или заполните карточку вручную.' }, 429);
         if (data?.name) return json({ ...data, platform: project.platform });

@@ -60,9 +60,15 @@
         <div class="eyebrow">НОВАЯ ЗАПИСЬ</div><h1 id="formTitle">Добавить игру</h1>
         <form id="gameForm" class="form-card">
           <input type="hidden" id="gameId">
-          <label>Ссылка на кампанию или магазин<input id="url" type="url" placeholder="https://www.kickstarter.com/…" inputmode="url"></label>
+          <label>Ссылка на кампанию, товар или заказ<input id="url" type="url" placeholder="https://www.kickstarter.com/…" inputmode="url"></label>
           <button type="button" class="secondary-button" id="fetchGame">Получить данные</button>
-          <p class="hint" id="formNote" role="status">Вставьте ссылку на кампанию или карточку товара Dire Wolf или GaGa.</p>
+          <details>
+            <summary>Импорт закрытого заказа из HTML</summary>
+            <p class="hint">Войдите в магазин, откройте заказ и сохраните страницу как HTML. Вставьте ссылку на заказ выше и выберите файл. Файл обрабатывается в этом браузере.</p>
+            <label>HTML-файл заказа<input id="orderHtml" type="file" accept=".html,.htm,text/html"></label>
+            <label id="orderItemField" hidden>Товар из заказа<select id="orderItem"></select></label>
+          </details>
+          <p class="hint" id="formNote" role="status"></p>
           <label>Название игры<input id="name" required placeholder="Например, Dice Throne: Nexus"></label>
           <label>Обложка (URL)<input id="cover" type="url" inputmode="url"></label>
           <label>Автор / издатель<input id="publisher"></label>
@@ -130,6 +136,6 @@
     </section>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=0.4.10"></script>
+  <script src="./app.js?v=0.4.11"></script>
 </body>
 </html>
