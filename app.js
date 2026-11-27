@@ -176,7 +176,7 @@
     if (days < 0) return 'Срок прошёл ' + deliveryDays.format(-days) + ' назад';
 
     if (calendarMonthOffset(today, months) > delivery) months--;
-    if (!months) return 'До доставки осталось меньше месяца (' + deliveryDays.format(days) + ')';
+    if (!months) return 'До доставки осталось ' + deliveryDays.format(days);
     const remainder = (delivery - calendarMonthOffset(today, months)) / dayMs;
     return 'До доставки осталось ' + deliveryMonths.format(months) +
       (remainder ? ' ' + deliveryDays.format(remainder) : '');
