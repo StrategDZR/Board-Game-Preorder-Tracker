@@ -180,6 +180,94 @@
     return data;
   }
 
+  function direWolfProductUrl(value) {
+    try {
+      const url = new URL(value);
+      if (url.origin !== 'https://shop.direwolfdigital.com' || url.username || url.password) return null;
+      const handle = url.pathname.match(/^\/products\/([a-z\d][a-z\d_-]*)\/?$/i)?.[1];
+      return handle ? new URL('/products/' + handle, url.origin) : null;
+    } catch { return null; }
+  }
+
+  function storeDescription(html) {
+    if (typeof html !== 'string') return '';
+    const template = document.createElement('template');
+    template.innerHTML = html.slice(0, 24_000);
+    for (const node of template.content.querySelectorAll('script,style,noscript,iframe')) node.remove();
+    for (const node of template.content.querySelectorAll('p,div,li,br,h1,h2,h3')) node.after(' ');
+    return (template.content.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 5000);
+  }
+
+  async function direWolfPrice(productUrl, options, signal) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(abort, 6000);
+    try {
+      const response = await fetch(productUrl, { ...options, signal: controller.signal });
+      if (!response.ok) return {};
+      const html = await response.text();
+      const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head\s*>/i)?.[1];
+      if (!head || head.length > 250_000) return {};
+      const template = document.createElement('template');
+      template.innerHTML = head;
+      const meta = property => template.content.querySelector('meta[property="' + property + '"]')?.content;
+      if (direWolfProductUrl(meta('og:url'))?.href !== productUrl.href) return {};
+      const price = meta('og:price:amount');
+      const currency = meta('og:price:currency');
+      return /^\d{1,9}(?:\.\d{1,2})?$/.test(price || '') &&
+        ['EUR', 'USD', 'RSD', 'GBP', 'RUB'].includes(currency) ? { price, currency } : {};
+    } catch {
+      return {};
+    } finally {
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', abort);
+    }
+  }
+
+  async function directDireWolf(productUrl, signal) {
+    const options = { signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' };
+    const quoteRequest = direWolfPrice(productUrl, options, signal);
+    let product;
+    try {
+      const response = await fetch(productUrl.href + '.js', options);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      product = await response.json();
+      if (product?.handle !== productUrl.pathname.slice('/products/'.length) ||
+          typeof product.title !== 'string' || !product.title.trim()) throw new Error('Неверный товар');
+    } catch {
+      const error = new Error('Dire Wolf не вернул карточку товара. Проверьте ссылку и попробуйте ещё раз.');
+      error.status = 502;
+      throw error;
+    }
+    let cover = '';
+    try {
+      if (typeof product.featured_image === 'string' && product.featured_image.trim()) {
+        const image = new URL(product.featured_image, productUrl);
+        if (image.protocol === 'https:') cover = image.href;
+      }
+    } catch { /* The cover is optional. */ }
+    const quote = await quoteRequest;
+    const hasPrice = product.price_varies === false && Number.isSafeInteger(product.price) &&
+      quote.currency && Math.round(Number(quote.price) * 100) === product.price;
+    return {
+      name: product.title.trim().slice(0, 300),
+      publisher: typeof product.vendor === 'string' ? product.vendor.trim().slice(0, 300) : '',
+      cover,
+      description: storeDescription(product.description),
+      platform: 'Dire Wolf',
+      price: hasPrice ? quote.price : '',
+      currency: hasPrice ? quote.currency : '',
+      sourceNote: hasPrice ? '' : 'Если цена и валюта не заполнились, их можно ввести вручную.'
+    };
+  }
+
+  async function importMetadata(url, signal) {
+    const product = direWolfProductUrl(url);
+    if (product) return directDireWolf(product, signal);
+    return api('/api/import?url=' + encodeURIComponent(url), { signal });
+  }
+
   function updateProject(value) {
     try {
       const url = new URL(value);
@@ -367,7 +455,7 @@
     $('fetchGame').disabled = true;
     note.textContent = 'Получаем данные кампании…';
     try {
-      const result = await api('/api/import?url=' + encodeURIComponent(url), { signal: controller.signal });
+      const result = await importMetadata(url, controller.signal);
       if (version !== formVersion) return;
       for (const id of importFields) {
         if (id === 'price' || id === 'currency' && result.price) continue;
