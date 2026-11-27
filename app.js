@@ -1,5 +1,7 @@
 (() => {
-  const KEY = 'mbgp_v02_games';
+  const legacyGamesKey = 'mbgp_v02_games';
+  const encryptedCacheKey = 'mbgp_encrypted_catalog';
+  const cacheContext = new TextEncoder().encode('Board Game Preorder Tracker catalog cache v1');
   let games = [];
   let editingId = null;
   const $ = id => document.getElementById(id);
@@ -19,21 +21,88 @@
   let importRequest;
   let updatesRequest;
   let catalogGeneration = 0;
-  function readSetting(key, fallback) {
-    try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
+  let state = {};
+  let localKey = null;
+  let cacheWrites = Promise.resolve();
+
+  function toBase64(bytes) {
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+    }
+    return btoa(binary);
   }
-  let state = readSetting(cloudKey, {});
-  function setState(next) {
-    state = next;
-    localStorage.setItem(cloudKey, JSON.stringify(state));
+  function fromBase64(value) {
+    return Uint8Array.from(atob(value), char => char.charCodeAt(0));
+  }
+  async function encryptLocal(key, snapshot) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const algorithm = { name: 'AES-GCM', iv, additionalData: cacheContext };
+    const ciphertext = await crypto.subtle.encrypt(algorithm, key, new TextEncoder().encode(snapshot));
+    return JSON.stringify({ version: 1, iv: toBase64(iv), data: toBase64(new Uint8Array(ciphertext)) });
+  }
+  async function decryptLocal(key, raw) {
+    const { version, iv, data } = JSON.parse(raw);
+    if (version !== 1 || typeof iv !== 'string' || typeof data !== 'string') throw new Error('Unknown cache format');
+    const nonce = fromBase64(iv);
+    if (nonce.length !== 12) throw new Error('Invalid cache nonce');
+    const algorithm = { name: 'AES-GCM', iv: nonce, additionalData: cacheContext };
+    const bytes = await crypto.subtle.decrypt(algorithm, key, fromBase64(data));
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  }
+
+  async function unlockLocal(secret) {
+    if (typeof secret !== 'string' || !/^[a-f\d]{64}$/.test(secret)) throw new Error('Ключ локальной копии недоступен.');
+    const bytes = Uint8Array.from(secret.match(/../g), pair => Number.parseInt(pair, 16));
+    const key = await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
+    bytes.fill(0);
+    await cacheWrites;
+    try {
+      const encrypted = localStorage.getItem(encryptedCacheKey);
+      const legacyGames = localStorage.getItem(legacyGamesKey);
+      const legacyState = localStorage.getItem(cloudKey);
+      let snapshot = encrypted ? await decryptLocal(key, encrypted) : {
+        games: JSON.parse(legacyGames || '[]'),
+        state: JSON.parse(legacyState || '{}')
+      };
+      if (!Array.isArray(snapshot.games) || !snapshot.state || typeof snapshot.state !== 'object') throw new Error('Invalid cache');
+      // A tab running an older release may have made unsynced edits since migration.
+      if (encrypted && legacyGames && JSON.parse(legacyState || '{}').dirty) {
+        const pending = JSON.parse(legacyGames);
+        if (!Array.isArray(pending) || JSON.stringify(pending) !== JSON.stringify(snapshot.games)) {
+          throw new Error('Conflicting legacy cache');
+        }
+      }
+      if (!encrypted && (legacyGames !== null || legacyState !== null)) {
+        localStorage.setItem(encryptedCacheKey, await encryptLocal(key, JSON.stringify(snapshot)));
+      }
+      localStorage.removeItem(legacyGamesKey);
+      localStorage.removeItem(cloudKey);
+      return { key, snapshot };
+    } catch {
+      throw new Error('Не удалось открыть или перенести локальную копию. Данные сохранены в браузере. Закройте вкладки со старой версией и повторите вход.');
+    }
+  }
+  function persistLocal() {
+    const key = localKey;
+    if (!key) return;
+    const snapshot = JSON.stringify({ games, state });
+    cacheWrites = cacheWrites.then(async () => {
+      const encrypted = await encryptLocal(key, snapshot);
+      localStorage.setItem(encryptedCacheKey, encrypted);
+    }).catch(() => {
+      if (key === localKey) {
+        $('cacheWarning').hidden = false;
+        toast('Зашифрованная копия не сохранилась в браузере.');
+      }
+    });
   }
   const statusLabels = {campaign:'Кампания / предзаказ',production:'Производство',shipping:'Отправлено',delivered:'Доставлено',paused:'Приостановлено'};
-  function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch{return []}}
-  function writeLocal(){localStorage.setItem(KEY,JSON.stringify(games));render()}
   function save(){
     change++;
-    setState({ ...state, dirty: true });
-    writeLocal();
+    state = { ...state, dirty: true };
+    persistLocal();
+    render();
     if (signedIn && state.endpoint === cloud.endpoint && Number.isInteger(state.revision)) sync('auto');
   }
   function webUrl(value) {
@@ -337,6 +406,9 @@
     $('detailContent').replaceChildren();
     resetForm();
     games = [];
+    state = {};
+    localKey = null;
+    $('cacheWarning').hidden = true;
     render();
     cloud = null;
     signedIn = false;
@@ -407,12 +479,16 @@
     let checkOnConnect = false;
     cloudStatus('Связываемся с D1…');
     try {
-      const remote = mode === 'auto' ? null : await api('/api/catalog');
+      const remote = mode === 'auto' ? null : await api('/api/catalog' + (mode === 'connect' ? '?unlock=1' : ''));
       if (cloud !== session) return;
       if (mode === 'connect') {
+        const { key, snapshot } = await unlockLocal(remote.cacheKey);
+        if (cloud !== session) return;
+        localKey = key;
+        state = snapshot.state;
+        games = snapshot.games;
         rememberGoogleSession(session.token);
         signedIn = true;
-        games = load();
         render();
       }
       const knownEndpoint = state.endpoint === endpoint;
@@ -423,11 +499,13 @@
         catalogGeneration++;
         if (editingId) resetForm();
         if ($('detailDialog').open) $('detailDialog').close();
-        writeLocal();
-        setState({ endpoint, revision: remote.revision, dirty: false });
+        state = { endpoint, revision: remote.revision, dirty: false };
+        persistLocal();
+        render();
       } else if (mode === 'connect' && remote.revision !== 0 &&
           (state.endpoint !== endpoint || state.revision !== remote.revision)) {
-        setState({ endpoint, dirty: true });
+        state = { endpoint, dirty: true };
+        persistLocal();
         cloudStatus('Выберите, какой каталог оставить: загрузить из D1 или отправить локальный.');
         return;
       } else {
@@ -438,7 +516,8 @@
         });
         if (cloud !== session) return;
         continueSaving = snapshot !== change;
-        setState({ endpoint, revision: result.revision, dirty: continueSaving });
+        state = { endpoint, revision: result.revision, dirty: continueSaving };
+        persistLocal();
       }
       cloudStatus('Каталог синхронизирован с D1.');
       checkOnConnect = mode === 'connect';
@@ -447,10 +526,13 @@
       if (error.status === 401) {
         endSession(error.message);
       } else if (mode === 'connect' && !signedIn) {
-        $('loginStatus').textContent = error.status ? error.message : 'Не удалось открыть каталог. Повторите вход.';
+        $('loginStatus').textContent = error.message || 'Не удалось открыть каталог. Повторите вход.';
         showGoogleSignIn();
       }
-      if (error.status === 409) setState({ endpoint, dirty: true });
+      if (error.status === 409) {
+        state = { endpoint, dirty: true };
+        persistLocal();
+      }
       cloudStatus(error.status === 409
         ? 'Каталог изменился на другом устройстве. Выберите, какую версию оставить.'
         : error.status ? error.message + ' Локальные записи доступны.'

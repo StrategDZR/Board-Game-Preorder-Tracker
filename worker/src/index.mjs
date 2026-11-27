@@ -208,6 +208,23 @@ async function authorized(request, env) {
     new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`));
 }
 
+async function catalogWithCacheKey(db) {
+  let row = await db.prepare(
+    'SELECT revision, games, key_hex FROM catalog LEFT JOIN catalog_cache_key USING (id) WHERE catalog.id = 1'
+  ).first();
+  if (row && !row.key_hex) {
+    const randomKey = Array.from(crypto.getRandomValues(new Uint8Array(32)),
+      byte => byte.toString(16).padStart(2, '0')).join('');
+    await db.prepare('INSERT INTO catalog_cache_key (id, key_hex) VALUES (1, ?) ON CONFLICT (id) DO NOTHING')
+      .bind(randomKey).run();
+    row = await db.prepare(
+      'SELECT revision, games, key_hex FROM catalog JOIN catalog_cache_key USING (id) WHERE catalog.id = 1'
+    ).first();
+  }
+  if (!row || !/^[a-f\d]{64}$/.test(row.key_hex)) throw new Error('Missing catalog encryption key');
+  return { revision: row.revision, games: JSON.parse(row.games), cacheKey: row.key_hex };
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -256,6 +273,7 @@ export default {
     if (url.pathname === '/api/catalog') {
       try {
         if (request.method === 'GET') {
+          if (url.searchParams.get('unlock') === '1') return json(await catalogWithCacheKey(env.DB));
           const row = await env.DB.prepare('SELECT revision, games FROM catalog WHERE id = 1').first();
           return json({ revision: row.revision, games: JSON.parse(row.games) });
         }
