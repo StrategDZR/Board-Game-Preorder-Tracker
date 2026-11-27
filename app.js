@@ -176,16 +176,17 @@
     if (days < 0) return 'Срок прошёл ' + deliveryDays.format(-days) + ' назад';
 
     if (calendarMonthOffset(today, months) > delivery) months--;
-    if (!months) return 'До доставки меньше месяца (' + deliveryDays.format(days) + ')';
+    if (!months) return 'До доставки осталось меньше месяца (' + deliveryDays.format(days) + ')';
     const remainder = (delivery - calendarMonthOffset(today, months)) / dayMs;
-    return 'До доставки ' + deliveryMonths.format(months) +
+    return 'До доставки осталось ' + deliveryMonths.format(months) +
       (remainder ? ' ' + deliveryDays.format(remainder) : '');
   }
 
   function deliveryCountdownMarkup(game) {
     if (game.type !== 'order' || !game.eta || game.status === 'delivered' || game.actualDeliveryDate) return '';
     const text = deliveryCountdown(game.eta);
-    return text ? `<span class="delivery-countdown" data-delivery-date="${esc(game.eta)}">${esc(text)}</span>` : '';
+    const shipping = game.status === 'shipping' ? ' shipping' : '';
+    return text ? `<span class="delivery-countdown${shipping}" data-delivery-date="${esc(game.eta)}">${esc(text)}</span>` : '';
   }
 
   function refreshDeliveryCountdowns() {

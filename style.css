@@ -34,7 +34,28 @@
 .order-import[open] summary { margin-bottom: 14px; }
 #orderItemField { margin-top: 14px; }
 .delivery-countdown { color: var(--gold); }
+.delivery-countdown.shipping { color: var(--green); }
 .game-info .delivery-summary { white-space: normal; }
+.card-list { container: game-list / inline-size; }
+@container game-list (min-width: 520px) {
+  .game-info:has(.delivery-summary) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 46%);
+    column-gap: 16px;
+  }
+  .game-info:has(.delivery-summary) > :not(.delivery-summary) { grid-column: 1; }
+  .game-info:has(.delivery-summary) .status { justify-self: start; }
+  .game-info .delivery-summary {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: right;
+  }
+}
 .form-card label[hidden] { display: none; }
 .danger-button { background: var(--danger); color: #1c1b15; }
 button:disabled { opacity: .55; cursor: default; }
