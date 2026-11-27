@@ -6,10 +6,10 @@ WITH entries AS (
 checked AS (
   SELECT position, game, (
     json_type(game, '$.eta') IS NOT NULL AND eta IS NOT '' AND (
-      typeof(eta) <> 'text' OR
-      eta NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR
-      substr(eta, 1, 4) = '0000' OR
-      date(eta, '+0 days') IS NOT eta
+      typeof(eta) <> 'text' OR substr(eta, 1, 4) = '0000' OR NOT (
+        (eta GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(eta, '+0 days') IS eta) OR
+        (eta GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND date(eta || '-01', '+0 days') IS (eta || '-01'))
+      )
     )
   ) AS invalid_eta
   FROM entries

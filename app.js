@@ -8,7 +8,7 @@
   const $ = id => document.getElementById(id);
   const fields = ['url', 'name', 'type', 'platform', 'price', 'currency', 'notes', 'cover', 'publisher', 'description'];
   const orderFields = ['status', 'shipping', 'eta', 'actualShipDate', 'actualDeliveryDate', 'campaignEnd'];
-  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignEnd', 'currency', 'price'];
+  const importFields = ['name', 'platform', 'cover', 'publisher', 'description', 'campaignEnd', 'eta', 'currency', 'price'];
   const cloudKey = 'mbgp_v03_cloud';
   const googleSessionKey = 'mbgp_google_session';
   const workerEndpoint = 'https://board-game-preorder-tracker.strategdzr.workers.dev';
@@ -103,7 +103,21 @@
   const statusLabels = {campaign:'Кампания / предзаказ',production:'Производство',shipping:'Отправлено',delivered:'Доставлено',paused:'Приостановлено'};
   const deliveryDays = new Intl.NumberFormat('ru', { style: 'unit', unit: 'day', unitDisplay: 'long' });
   const deliveryMonths = new Intl.NumberFormat('ru', { style: 'unit', unit: 'month', unitDisplay: 'long' });
+  const deliveryMonthLabel = new Intl.DateTimeFormat('ru', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const dayMs = 86_400_000;
+  const isDeliveryMonth = value => /^(?!0000)\d{4}-(?:0[1-9]|1[0-2])$/.test(value);
+
+  function deliveryDate(value) {
+    if (typeof value !== 'string' || !/^(?!0000)\d{4}-\d{2}(?:-\d{2})?$/.test(value)) return null;
+    const iso = isDeliveryMonth(value) ? value + '-01' : value;
+    const date = new Date(iso + 'T00:00:00Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === iso ? date : null;
+  }
+
+  function formatDeliveryDate(value) {
+    const date = deliveryDate(value);
+    return date && isDeliveryMonth(value) ? deliveryMonthLabel.format(date) : value;
+  }
 
   function calendarMonthOffset(date, months) {
     const offset = new Date(date);
@@ -114,17 +128,22 @@
   }
 
   function deliveryCountdown(eta, now = new Date()) {
+    const delivery = deliveryDate(eta);
+    if (!delivery) return '';
     const today = new Date(now);
     today.setUTCFullYear(now.getFullYear(), now.getMonth(), now.getDate());
     today.setUTCHours(0, 0, 0, 0);
-    const delivery = new Date(eta + 'T00:00:00Z');
+    let months = (delivery.getUTCFullYear() - today.getUTCFullYear()) * 12 +
+      delivery.getUTCMonth() - today.getUTCMonth();
+    if (isDeliveryMonth(eta)) {
+      if (months === 0) return 'Ожидается в этом месяце';
+      if (months < 0) return 'Ожидаемый месяц прошёл';
+      return 'Ориентировочно через ' + deliveryMonths.format(months);
+    }
     const days = (delivery - today) / dayMs;
-    if (!Number.isFinite(days)) return '';
     if (days === 0) return 'Ожидается сегодня';
     if (days < 0) return 'Срок прошёл ' + deliveryDays.format(-days) + ' назад';
 
-    let months = (delivery.getUTCFullYear() - today.getUTCFullYear()) * 12 +
-      delivery.getUTCMonth() - today.getUTCMonth();
     if (calendarMonthOffset(today, months) > delivery) months--;
     if (!months) return 'До доставки меньше месяца (' + deliveryDays.format(days) + ')';
     const remainder = (delivery - calendarMonthOffset(today, months)) / dayMs;
@@ -193,7 +212,7 @@
     const cssClass = order && Object.hasOwn(statusLabels, game.status) ? game.status : '';
     const cover = webUrl(game.cover);
     const countdown = deliveryCountdownMarkup(game);
-    const subtitle = order ? esc(game.eta || '') : 'В списке желаний';
+    const subtitle = order ? esc(formatDeliveryDate(game.eta) || '') : 'В списке желаний';
     return `<article class="game-card" data-id="${esc(game.id)}">
       <div class="cover">${cover ? `<img src="${esc(cover)}" alt="" referrerpolicy="no-referrer">` : '✦'}</div>
       <div class="game-info"><h3>${esc(game.name)}</h3>
@@ -219,14 +238,20 @@
     $('orderItemField').hidden = true;
   }
   $('url').addEventListener('input', cancelImport);
+  function setDeliveryInput(value, month = isDeliveryMonth(value)) {
+    $('etaMonthMode').checked = month;
+    $('eta').type = month ? 'month' : 'date';
+    $('eta').value = value;
+  }
+  $('etaMonthMode').addEventListener('change', () => {
+    const month = $('etaMonthMode').checked;
+    setDeliveryInput(month ? $('eta').value.slice(0, 7) : '', month);
+  });
   function normalizeDeliveryDates(catalog) {
     return catalog.map(game => {
       const { eta, ...rest } = game;
       if (eta === undefined || eta === '') return game;
-      if (typeof eta === 'string' && /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(eta)) {
-        const date = new Date(eta + 'T00:00:00Z');
-        if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === eta) return game;
-      }
+      if (deliveryDate(eta)) return game;
       return rest;
     });
   }
@@ -234,6 +259,7 @@
     editingId = null;
     cancelImport();
     $('gameForm').reset();
+    setDeliveryInput('');
     $('gameId').value = '';
     $('formTitle').textContent = 'Добавить игру';
     $('type').value = type;
@@ -252,6 +278,11 @@
     const visibleFields = $('type').value === 'order' ? [...fields, ...orderFields] : [...fields, 'releaseDate'];
     const values = Object.fromEntries(visibleFields.map(field => [field, $(field).value.trim()]));
     if (!values.name) return;
+    if (values.eta && !deliveryDate(values.eta)) {
+      toast('Укажите срок доставки в календаре.');
+      $('eta').focus();
+      return;
+    }
     const game = { ...games[index], ...values, id, updated: Date.now() };
     if (index >= 0) games[index] = game;
     else games.unshift(game);
@@ -268,7 +299,7 @@
     const url = webUrl(g.url);
     const order = g.type === 'order';
     const countdown = deliveryCountdownMarkup(g);
-    d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ['Дата релиза', g.releaseDate], ...(order ? [['Ожидаемая доставка', g.eta], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions">${order?'':'<button type="button" class="primary-button" id="moveToOrders">Перенести в предзаказы</button>'}<button type="button" class="${order?'primary':'secondary'}-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;
+    d.innerHTML=`<div class="eyebrow">${g.type==='wishlist'?'WISHLIST':'ПРЕДЗАКАЗ'}</div><h2>${esc(g.name)}</h2><p>${esc(g.platform||'Площадка не указана')} · ${esc(order ? statusLabels[g.status]||'Предзаказ' : 'Wishlist')}</p>${url?`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--gold)">Открыть страницу проекта ↗</a></p>`:''}${[['Автор / издатель', g.publisher], ['Описание', g.description], ['Дата релиза', g.releaseDate], ...(order ? [['Ожидаемая доставка', formatDeliveryDate(g.eta)], ['Фактически отправлено', g.actualShipDate], ['Фактически получено', g.actualDeliveryDate], ['Конец кампании', g.campaignEnd]] : [])].filter(([,value])=>value).map(([label,value])=>'<p><b>'+label+':</b> '+esc(value)+'</p>').join('')}${(g.price||g.type==='order'&&g.shipping)?`<p><b>Цена:</b> ${esc(g.price||'—')} ${esc(g.currency)}${g.type==='order'&&g.shipping?'<br><b>Доставка:</b> '+esc(g.shipping)+' '+esc(g.currency):''}</p>`:''}${g.notes?`<p>${esc(g.notes)}</p>`:''}${renderHistory(g)}<div class="detail-actions">${order?'':'<button type="button" class="primary-button" id="moveToOrders">Перенести в предзаказы</button>'}<button type="button" class="${order?'primary':'secondary'}-button" id="editGame">Изменить</button><button class="secondary-button" id="deleteGame">Удалить</button></div>`;
     if (countdown) d.querySelector('h2').insertAdjacentHTML('afterend', `<p>${countdown}</p>`);
     $('detailDialog').showModal();
     $('editGame').onclick = () => {
@@ -324,8 +355,10 @@
     $('gameId').value = game.id;
     $('formTitle').textContent = 'Редактировать игру';
     for (const id of [...fields, ...orderFields, 'releaseDate']) {
+      if (id === 'eta') continue;
       if (id !== 'status' || Object.hasOwn(statusLabels, game.status)) $(id).value = game[id] ?? '';
     }
+    setDeliveryInput(game.eta || '');
     showTypeFields();
     $('cancelEdit').hidden = false;
     go('add');
@@ -898,12 +931,15 @@
   function fillImportedFields(result, before) {
     const filled = {};
     const fill = (id, value) => {
-      $(id).value = value;
+      if (id === 'eta') {
+        if (!deliveryDate(value)) return;
+        setDeliveryInput(value);
+      } else $(id).value = value;
       if ($(id).value) filled[id] = $(id).value;
     };
     for (const id of importFields) {
       if (id === 'price' || id === 'currency' && result.price ||
-          id === 'campaignEnd' && $('type').value !== 'order') continue;
+          (id === 'campaignEnd' || id === 'eta') && $('type').value !== 'order') continue;
       if (!before[id] && $(id).value === before[id] && typeof result[id] === 'string') fill(id, result[id]);
     }
     if (result.price && result.currency && !before.price && !$('price').value &&

@@ -2,6 +2,8 @@ const CURRENCIES = ['EUR', 'USD', 'RSD', 'GBP', 'RUB'];
 const SLUG = /^[a-z0-9][a-z0-9_-]*$/i;
 const MAX_CATALOG_BYTES = 1_000_000;
 const MAX_SOURCE_BYTES = 1_000_000;
+const GAGA_SCHEDULE_URL = 'https://www.gaga-games.com/grafik-izdatelstva/';
+const GAGA_MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const BURST_LIMITS = { import: 12, read: 60, write: 30 };
 const bursts = new Map();
 
@@ -70,7 +72,7 @@ function storeFromUrl(url) {
   }
   if (['gaga-games.com', 'www.gaga-games.com'].includes(url.hostname)) {
     const product = url.pathname.match(/^\/preorder\/([a-z\d][a-z\d_-]*)\/?$/i);
-    return { platform: 'GaGa Games', store: true, preorder: true, url: product ?
+    return { platform: 'GaGa Games', store: true, preorder: true, slug: product?.[1], url: product ?
       `https://www.gaga-games.com/preorder/${product[1]}/` : '' };
   }
   if (['lavkaigr.ru', 'www.lavkaigr.ru'].includes(url.hostname) &&
@@ -127,6 +129,35 @@ async function importGamefound(project) {
     if (data?.name) return data;
   } catch { /* Try the public project page. */ }
   return importPublicPage(project);
+}
+
+function gagaScheduleMonth(html, slug) {
+  const productLink = `href="https://gaga.ru/game/${slug}/"`;
+  const dates = new Set();
+  const rows = html.split(/<div\b[^>]*\bclass="jet-listing-grid__item\b/gi).slice(1);
+  for (const row of rows) {
+    if (!row.includes(productLink)) continue;
+    for (const match of row.matchAll(/class="jet-listing-dynamic-field__content">\s*([а-яё]+)\s+(20\d{2})\s*<\/div>/gi)) {
+      const month = GAGA_MONTHS.indexOf(match[1].toLowerCase()) + 1;
+      if (month) dates.add(`${match[2]}-${String(month).padStart(2, '0')}`);
+    }
+  }
+  return dates.size === 1 ? [...dates][0] : '';
+}
+
+async function importGaGaPreorder(project) {
+  const page = await importPublicPage(project);
+  if (!page) return null;
+  try {
+    const response = await upstream(GAGA_SCHEDULE_URL, 'text/html', 4_000);
+    if (response.ok && response.headers.get('content-type')?.toLowerCase().includes('text/html')) {
+      const eta = gagaScheduleMonth(await readText(response, 2_000_000), project.slug);
+      if (eta) return { ...page, eta, sourceNote: 'Срок — ориентир поступления на склад из графика GaGa Games.' };
+    } else {
+      await response.body?.cancel();
+    }
+  } catch { /* The campaign metadata remains available if the schedule fails. */ }
+  return page;
 }
 
 async function importPublicPage(project) {
@@ -359,7 +390,7 @@ export default {
       if (!project) return json({ error: 'Вставьте HTTPS-ссылку на публичную кампанию или товар поддерживаемого магазина. Для закрытого заказа используйте импорт из HTML.' }, 400);
       if (!project.url) return json({ error: 'Откройте конкретную игру в магазине и вставьте ссылку на её страницу.' }, 400);
       try {
-        const data = await (project.store ? importPublicPage(project) :
+        const data = await (project.preorder ? importGaGaPreorder(project) : project.store ? importPublicPage(project) :
           project.platform === 'Gamefound' ? importGamefound(project) : importKickstarter(project));
         if (data?.rateLimited) return json({ error: 'Достигнут бесплатный лимит резервного источника Kickstarter. Попробуйте позже или заполните карточку вручную.' }, 429);
         if (data?.name) return json({ ...data, platform: project.platform });
