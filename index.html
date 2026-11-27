@@ -50,24 +50,29 @@
         <form id="gameForm" class="form-card">
           <input type="hidden" id="gameId">
           <label>Ссылка на кампанию или магазин<input id="url" type="url" placeholder="https://www.kickstarter.com/…" inputmode="url"></label>
-          <p class="hint">Площадка определится автоматически, если её удастся распознать.</p>
+          <button type="button" class="secondary-button" id="fetchGame">Получить данные</button>
+          <p class="hint" id="formNote" role="status">Импорт доступен для Kickstarter и Gamefound.</p>
           <label>Название игры<input id="name" required placeholder="Например, Dice Throne: Nexus"></label>
+          <label>Обложка (URL)<input id="cover" type="url" inputmode="url"></label>
+          <label>Автор / издатель<input id="publisher"></label>
+          <label>Описание<textarea id="description" rows="3"></textarea></label>
+          <div class="form-grid">
+            <label>Начало кампании<input id="campaignStart" type="date"></label>
+            <label>Конец кампании<input id="campaignEnd" type="date"></label>
+          </div>
           <div class="form-grid">
             <label>Тип записи<select id="type"><option value="order">Предзаказ</option><option value="wishlist">Wishlist</option></select></label>
             <label>Площадка<select id="platform"><option value="">Не указана</option><option>Kickstarter</option><option>Gamefound</option><option>Lavka Games</option><option>GaGa Games</option><option>Другое</option></select></label>
           </div>
+          <label>Валюта<select id="currency"><option value="">Не указана</option><option>EUR</option><option>USD</option><option>RSD</option><option>GBP</option></select></label>
           <div id="orderFields">
             <label>Статус<select id="status"><option value="campaign">Кампания / предзаказ</option><option value="production">Производство</option><option value="shipping">Отправлено</option><option value="delivered">Доставлено</option><option value="paused">Приостановлено</option></select></label>
-            <div class="form-grid">
-              <label>Цена игры<input id="price" type="number" min="0" step="0.01" placeholder="0"></label>
-              <label>Валюта<select id="currency"><option>EUR</option><option>USD</option><option>RSD</option><option>GBP</option></select></label>
-            </div>
+            <label>Цена игры<input id="price" type="number" min="0" step="0.01" placeholder="0"></label>
             <label>Доставка<input id="shipping" type="number" min="0" step="0.01" placeholder="0"></label>
             <label>Ожидаемая дата<input id="eta" type="text" placeholder="Например, март 2027"></label>
           </div>
           <label>Заметки<textarea id="notes" rows="3" placeholder="Комплектация, дополнения, stretch goals…"></textarea></label>
           <div class="form-actions"><button type="button" class="secondary-button" id="cancelEdit">Отмена</button><button class="primary-button" type="submit">Сохранить игру</button></div>
-          <p class="form-note" id="formNote">Данные сохраняются в этом браузере на устройстве. Импорт с площадок пока не подключён.</p>
         </form>
       </section>
 
@@ -77,7 +82,20 @@
           <h3>Резервная копия</h3><p>Сохрани каталог в JSON-файл или восстанови его на другом устройстве.</p>
           <div class="settings-actions"><button class="primary-button" id="exportBtn">Экспорт JSON</button><label class="secondary-button file-label">Импорт JSON<input id="importFile" type="file" accept="application/json,.json" hidden></label></div>
         </div>
-        <div class="settings-card"><h3>Хранение данных</h3><p>Сейчас данные хранятся локально в браузере. Они не синхронизируются между устройствами автоматически.</p><p class="muted">Версия 0.2 · GitHub Pages edition</p></div>
+        <div class="settings-card">
+          <h3>Облачное хранение</h3>
+          <form id="cloudForm" class="cloud-form">
+            <label>Адрес Cloudflare Worker<input id="workerUrl" type="url" required placeholder="https://имя.поддомен.workers.dev" autocapitalize="none"></label>
+            <label>Ключ доступа<input id="accessToken" type="password" required minlength="32" autocomplete="off" autocapitalize="none"></label>
+            <div class="settings-actions">
+              <button class="primary-button" type="submit" id="connectCloud">Подключить</button>
+              <button class="secondary-button" type="button" id="downloadCloud">Загрузить из D1</button>
+              <button class="secondary-button" type="button" id="uploadCloud">Отправить в D1</button>
+            </div>
+            <p class="muted" id="cloudStatus" role="status">Работаем с локальным каталогом.</p>
+          </form>
+          <p class="muted">Версия 0.3 · GitHub Pages + Cloudflare</p>
+        </div>
         <div class="settings-card"><h3>Проверка обновлений</h3><p>Автоматическое получение новостей и статусов с Kickstarter, Gamefound и магазинов пока не подключено. Кнопка проверки появится после интеграции источников.</p></div>
       </section>
     </main>

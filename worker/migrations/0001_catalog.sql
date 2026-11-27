@@ -1,0 +1,6 @@
+CREATE TABLE catalog (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  revision INTEGER NOT NULL DEFAULT 0,
+  games TEXT NOT NULL DEFAULT '[]'
+);
+INSERT INTO catalog (id) VALUES (1);

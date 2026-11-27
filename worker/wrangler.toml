@@ -1,0 +1,11 @@
+name = "board-game-preorder-tracker"
+main = "src/index.mjs"
+compatibility_date = "2026-01-01"
+
+[vars]
+SITE_ORIGINS = "https://strategdzr.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "board-game-preorders"
+database_id = "00000000-0000-0000-0000-000000000000"
